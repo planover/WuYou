@@ -1,0 +1,12 @@
+{
+  "name": "WuYou（一坞邮）",
+  "version": "1.0.0",
+  "description": "你的邮件，都在坞里。多邮箱统一管理，端到端加密，日历通讯录任务便签全支持。",
+  "icon": "icon.png",
+  "author": "WuYou Team",
+  "homepage": "https://github.com/your-username/WuYou",
+  "ports": ["8000:8000"],
+  "docker_compose": "../docker-compose.yml",
+  "category": "办公",
+  "min_fnos_version": "0.8.0"
+}

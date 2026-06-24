@@ -1,0 +1,19 @@
+{
+  "id": "mail-label-assistant",
+  "name": "邮件标签助手",
+  "version": "0.1.0",
+  "type": "extension",
+  "category": "邮件规则",
+  "description": "根据标题、发件人和关键词给邮件打标签的示例插件清单。",
+  "entry": "index.js",
+  "permissions": [
+    "mail:read",
+    "tags:write"
+  ],
+  "license": "Apache-2.0",
+  "author": "WuYou Team",
+  "runtime": {
+    "kind": "web-worker",
+    "api": "wuyou.plugin.v1"
+  }
+}

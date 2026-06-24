@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "id": "light",
+    "name": "WuYou 日间",
+    "description": "简约邮箱工作台主题，默认日间模式。"
+  },
+  "tokens": {
+    "bg": "#eef3f9",
+    "surface": "#ffffff",
+    "primary": "#1d73e8",
+    "text": "#182235"
+  }
+}

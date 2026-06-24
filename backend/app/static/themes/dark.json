@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "id": "dark",
+    "name": "WuYou 夜间",
+    "description": "适合低光环境的深色主题。"
+  },
+  "tokens": {
+    "bg": "#111827",
+    "surface": "#1f2937",
+    "primary": "#5b9dff",
+    "text": "#f8fafc"
+  }
+}

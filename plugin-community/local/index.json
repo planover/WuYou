@@ -1,0 +1,31 @@
+{
+  "name": "WuYou 本地插件开发社区",
+  "version": "0.1.0",
+  "description": "默认本地插件源，可在设置里切换或添加在线社区地址。",
+  "categories": [
+    "效率工具",
+    "安全加密",
+    "翻译与AI",
+    "邮件规则",
+    "导入导出",
+    "主题外观",
+    "开发者工具"
+  ],
+  "plugins": [
+    {
+      "id": "mail-label-assistant",
+      "name": "邮件标签助手",
+      "version": "0.1.0",
+      "type": "extension",
+      "category": "邮件规则",
+      "description": "示例插件：演示如何声明权限、入口和分类，后续可扩展为自动标签规则。",
+      "entry": "plugins/mail-label-assistant/plugin.json",
+      "permissions": [
+        "mail:read",
+        "tags:write"
+      ],
+      "license": "Apache-2.0",
+      "author": "WuYou Team"
+    }
+  ]
+}

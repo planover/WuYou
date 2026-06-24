@@ -1,0 +1,290 @@
+"""Mail, tags, search, and compose routes."""
+
+from __future__ import annotations
+
+import json
+import os
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+
+from app.api.deps import get_current_user, json_loads
+from app.core.config import get_settings
+from app.core.database import db
+from app.core.security import decrypt_secret, utc_iso
+from app.models import MessageOut, SendMailRequest, TagCreate, TagOut
+from app.services.mail_client import send_email
+
+from collections import defaultdict
+
+router = APIRouter(prefix="/api/mail", tags=["mail"])
+
+
+def _message_out(row, tag_map: dict[int, list[dict]] | None = None) -> MessageOut:
+    """将数据行转为 MessageOut。
+
+    提供 tag_map 时直接从预加载的批量结果中取 tag（避免 N+1）。
+    不提供时单独查询（仅用于单封邮件详情）。
+    """
+    message_id = row["id"]
+    if tag_map is not None:
+        tags = tag_map.get(message_id, [])
+    else:
+        tags = db.query_all(
+            """
+            SELECT tags.id, tags.name, tags.color, tags.priority
+            FROM tags
+            JOIN message_tags ON message_tags.tag_id = tags.id
+            WHERE message_tags.message_id = ?
+            ORDER BY tags.priority DESC, tags.name
+            """,
+            (message_id,),
+        )
+    return MessageOut(
+        id=message_id,
+        mailbox_id=row["mailbox_id"],
+        folder=row["folder"],
+        subject=row["subject"],
+        sender=row["sender"],
+        recipients=json_loads(row["recipients"], []),
+        snippet=row["snippet"],
+        body_text=row["body_text"],
+        body_html=row["body_html"],
+        attachments=json_loads(row["attachments_json"], []),
+        unread=bool(row["unread"]),
+        starred=bool(row["starred"]),
+        has_attachments=bool(row["has_attachments"]),
+        remote_content_allowed=bool(row["remote_content_allowed"]),
+        received_at=row["received_at"],
+        tags=tags if isinstance(tags, list) else [dict(item) for item in tags],
+    )
+
+
+def _batch_tag_map(message_ids: list[int], user_id: int) -> dict[int, list[dict]]:
+    """一次查询拉取所有 message 的标签，按 message_id 分组返回。
+
+    消除 inbox 列表页面的 N+1 查询问题：从每封邮件查一次
+    变为只查一次 GROUP BY 查询。
+    """
+    if not message_ids:
+        return {}
+    placeholders = ",".join("?" for _ in message_ids)
+    rows = db.query_all(
+        f"""
+        SELECT message_tags.message_id, tags.id, tags.name, tags.color, tags.priority
+        FROM tags
+        JOIN message_tags ON message_tags.tag_id = tags.id
+        WHERE tags.user_id = ? AND message_tags.message_id IN ({placeholders})
+        ORDER BY tags.priority DESC, tags.name
+        """,
+        [user_id] + message_ids,
+    )
+    tag_map: dict[int, list[dict]] = defaultdict(list)
+    for r in rows:
+        tag_map[r["message_id"]].append({
+            "id": r["id"],
+            "name": r["name"],
+            "color": r["color"],
+            "priority": r["priority"],
+        })
+    return tag_map
+
+
+def _get_message(message_id: int, user_id: int):
+    row = db.query_one("SELECT * FROM messages WHERE id = ? AND user_id = ?", (message_id, user_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="邮件不存在。")
+    return row
+
+
+@router.get("/inbox", response_model=list[MessageOut])
+def inbox(
+    status: str = Query(default="all", pattern="^(all|unread|read)$"),
+    q: str = "",
+    tag_id: int | None = None,
+    folder_role: str = Query(default="all", pattern="^(all|inbox|sent|trash|archive|junk|custom)$"),
+    current_user: dict = Depends(get_current_user),
+):
+    where = ["messages.user_id = ?"]
+    params: list = [current_user["user_id"]]
+    if status == "unread":
+        where.append("messages.unread = 1")
+    elif status == "read":
+        where.append("messages.unread = 0")
+    if q:
+        where.append("(messages.subject LIKE ? OR messages.sender LIKE ? OR messages.body_text LIKE ?)")
+        like = f"%{q}%"
+        params.extend([like, like, like])
+    if tag_id:
+        where.append("messages.id IN (SELECT message_id FROM message_tags WHERE tag_id = ?)")
+        params.append(tag_id)
+    if folder_role != "all":
+        where.append("messages.folder_role = ?")
+        params.append(folder_role)
+    sql = f"""
+        SELECT messages.*
+        FROM messages
+        WHERE {' AND '.join(where)}
+        ORDER BY unread DESC, received_at DESC
+        LIMIT 200
+    """
+    rows = db.query_all(sql, params)
+    tag_map = _batch_tag_map([r["id"] for r in rows], current_user["user_id"])
+    return [_message_out(row, tag_map) for row in rows]
+
+
+@router.get("/folders")
+def list_folders(current_user: dict = Depends(get_current_user)):
+    """Return DISTINCT folder_role values with message counts for the current user."""
+    rows = db.query_all(
+        """
+        SELECT folder_role, COUNT(*) AS count
+        FROM messages
+        WHERE user_id = ?
+        GROUP BY folder_role
+        ORDER BY
+            CASE folder_role
+                WHEN 'inbox' THEN 1
+                WHEN 'sent' THEN 2
+                WHEN 'trash' THEN 3
+                WHEN 'archive' THEN 4
+                WHEN 'junk' THEN 5
+                ELSE 6
+            END
+        """,
+        (current_user["user_id"],),
+    )
+    return [dict(row) for row in rows]
+
+
+@router.get("/messages/{message_id}", response_model=MessageOut)
+def get_message(message_id: int, current_user: dict = Depends(get_current_user)):
+    return _message_out(_get_message(message_id, current_user["user_id"]))
+
+
+@router.post("/messages/{message_id}/read")
+def mark_read(message_id: int, unread: bool = False, current_user: dict = Depends(get_current_user)):
+    _get_message(message_id, current_user["user_id"])
+    db.execute("UPDATE messages SET unread = ?, updated_at = ? WHERE id = ?", (1 if unread else 0, utc_iso(), message_id))
+    return {"message": "邮件状态已更新。"}
+
+
+@router.post("/messages/{message_id}/remote-content")
+def allow_remote_content(message_id: int, allowed: bool, current_user: dict = Depends(get_current_user)):
+    _get_message(message_id, current_user["user_id"])
+    db.execute(
+        "UPDATE messages SET remote_content_allowed = ?, updated_at = ? WHERE id = ?",
+        (1 if allowed else 0, utc_iso(), message_id),
+    )
+    return {"message": "远程内容加载设置已更新。"}
+
+
+@router.get("/tags", response_model=list[TagOut])
+def list_tags(current_user: dict = Depends(get_current_user)):
+    rows = db.query_all(
+        "SELECT id, name, color, priority FROM tags WHERE user_id = ? ORDER BY priority DESC, name",
+        (current_user["user_id"],),
+    )
+    return [TagOut(**dict(row)) for row in rows]
+
+
+@router.post("/tags", response_model=TagOut)
+def create_tag(payload: TagCreate, current_user: dict = Depends(get_current_user)):
+    cursor = db.execute(
+        "INSERT INTO tags(user_id, name, color, priority, created_at) VALUES (?, ?, ?, ?, ?)",
+        (current_user["user_id"], payload.name, payload.color, payload.priority, utc_iso()),
+    )
+    row = db.query_one("SELECT id, name, color, priority FROM tags WHERE id = ?", (cursor.lastrowid,))
+    return TagOut(**dict(row))
+
+
+@router.post("/messages/{message_id}/tags/{tag_id}")
+def toggle_tag(message_id: int, tag_id: int, enabled: bool = True, current_user: dict = Depends(get_current_user)):
+    _get_message(message_id, current_user["user_id"])
+    tag = db.query_one("SELECT * FROM tags WHERE id = ? AND user_id = ?", (tag_id, current_user["user_id"]))
+    if not tag:
+        raise HTTPException(status_code=404, detail="标签不存在。")
+    if enabled:
+        db.execute("INSERT OR IGNORE INTO message_tags(message_id, tag_id) VALUES (?, ?)", (message_id, tag_id))
+    else:
+        db.execute("DELETE FROM message_tags WHERE message_id = ? AND tag_id = ?", (message_id, tag_id))
+    return {"message": "标签已更新。"}
+
+
+@router.post("/attachments")
+async def upload_attachment(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    upload_dir = os.path.join(get_settings().data_dir, "attachments", str(current_user["user_id"]))
+    os.makedirs(upload_dir, exist_ok=True)
+    safe_name = f"{uuid.uuid4().hex}_{file.filename or 'attachment'}"
+    file_path = os.path.join(upload_dir, safe_name)
+    content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(content)
+    cursor = db.execute(
+        "INSERT INTO attachments(user_id, filename, original_name, size_bytes, content_type, file_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            current_user["user_id"],
+            safe_name,
+            file.filename or "attachment",
+            len(content),
+            file.content_type or "application/octet-stream",
+            file_path,
+            utc_iso(),
+        ),
+    )
+    return {"id": cursor.lastrowid, "filename": file.filename, "size": len(content)}
+
+
+@router.post("/send")
+def send(payload: SendMailRequest, current_user: dict = Depends(get_current_user)):
+    account = db.query_one(
+        "SELECT * FROM mailbox_accounts WHERE id = ? AND user_id = ?",
+        (payload.mailbox_id, current_user["user_id"]),
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="发件邮箱不存在。")
+    attachments_data = []
+    if payload.attachment_ids:
+        rows = db.query_all(
+            "SELECT * FROM attachments WHERE id IN ({seq}) AND user_id = ?".format(
+                seq=",".join("?" * len(payload.attachment_ids))
+            ),
+            [*payload.attachment_ids, current_user["user_id"]],
+        )
+        attachments_data = [dict(row) for row in rows]
+    try:
+        result = send_email(dict(account), decrypt_secret(account["encrypted_secret"], get_settings().secret_key_path), payload, attachments_data)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"发信失败：{exc}") from exc
+    return result
+
+
+@router.get("/unread")
+def unread_summary(current_user: dict = Depends(get_current_user)):
+    row = db.query_one("SELECT COUNT(*) AS count FROM messages WHERE user_id = ? AND unread = 1", (current_user["user_id"],))
+    return {"unread": row["count"]}
+
+
+@router.get("/search")
+def search(q: str, current_user: dict = Depends(get_current_user)):
+    like = f"%{q}%"
+    messages = db.query_all(
+        """
+        SELECT id, 'message' AS kind, subject AS title, snippet AS body, received_at AS updated_at
+        FROM messages
+        WHERE user_id = ? AND (subject LIKE ? OR sender LIKE ? OR body_text LIKE ?)
+        ORDER BY received_at DESC LIMIT 80
+        """,
+        (current_user["user_id"], like, like, like),
+    )
+    content = db.query_all(
+        """
+        SELECT id, kind, title, body, updated_at
+        FROM content_items
+        WHERE user_id = ? AND (title LIKE ? OR body LIKE ?)
+        ORDER BY updated_at DESC LIMIT 80
+        """,
+        (current_user["user_id"], like, like),
+    )
+    return {"results": [dict(row) for row in messages + content]}
+

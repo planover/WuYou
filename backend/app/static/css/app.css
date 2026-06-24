@@ -1,0 +1,1124 @@
+:root {
+  --bg: #eef3f9;
+  --surface: #ffffff;
+  --surface-soft: #f7faff;
+  --line: #dce5f1;
+  --text: #182235;
+  --muted: #64748b;
+  --primary: #1d73e8;
+  --primary-strong: #155fc2;
+  --green: #0f9f6e;
+  --red: #d93025;
+  --yellow: #f4b400;
+  --purple: #7c3aed;
+  --shadow: 0 10px 30px rgba(18, 35, 60, 0.1);
+  --border: #dce5f1;
+}
+
+[data-theme="dark"] {
+  --bg: #111827;
+  --surface: #1f2937;
+  --surface-soft: #263244;
+  --line: #374151;
+  --text: #f8fafc;
+  --muted: #aeb8c7;
+  --primary: #5b9dff;
+  --primary-strong: #8bbaff;
+  --green: #34d399;
+  --red: #fb7185;
+  --yellow: #facc15;
+  --purple: #c084fc;
+  --shadow: 0 14px 34px rgba(0, 0, 0, 0.32);
+  --border: #374151;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+  letter-spacing: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  cursor: pointer;
+}
+
+.boot {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.boot-panel {
+  width: min(420px, calc(100vw - 32px));
+  padding: 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.brand-mark {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 12px;
+  border-radius: 8px;
+  color: #fff;
+  background: linear-gradient(135deg, #1d73e8, #10b981 48%, #f59e0b);
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.rainbow-loader {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-soft);
+}
+
+.rainbow-loader span {
+  display: block;
+  width: 45%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ef4444, #f97316, #eab308, #22c55e, #06b6d4, #3b82f6, #8b5cf6);
+  animation: loading 1.4s infinite ease-in-out;
+}
+
+@keyframes loading {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(230%);
+  }
+}
+
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(320px, 480px) minmax(320px, 1fr);
+}
+
+.auth-hero {
+  padding: 48px;
+  color: #fff;
+  background:
+    linear-gradient(135deg, rgba(29, 115, 232, 0.94), rgba(15, 159, 110, 0.88)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='900' height='900' viewBox='0 0 900 900'%3E%3Cg fill='none' stroke='rgba(255,255,255,.28)' stroke-width='2'%3E%3Cpath d='M120 210h660v430H120z'/%3E%3Cpath d='M120 210l330 250 330-250'/%3E%3Cpath d='M190 710h520M230 760h440M260 120h380'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: cover;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.auth-hero h1 {
+  margin: 18px 0 12px;
+  font-size: 46px;
+}
+
+.auth-hero p {
+  max-width: 520px;
+  line-height: 1.8;
+  opacity: 0.95;
+}
+
+.auth-form-wrap {
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.auth-form {
+  width: min(460px, 100%);
+  padding: 28px;
+}
+
+.auth-tabs,
+.segmented {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.auth-tabs button,
+.segmented button {
+  min-width: 88px;
+  height: 34px;
+  color: var(--muted);
+  background: transparent;
+  border-radius: 6px;
+}
+
+.auth-tabs button.active,
+.segmented button.active {
+  color: #fff;
+  background: var(--primary);
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.field label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  min-height: 40px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  outline: none;
+}
+
+.field textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(29, 115, 232, 0.16);
+}
+
+.btn {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 14px;
+  color: var(--text);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.btn.primary {
+  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.btn.primary:hover {
+  background: var(--primary-strong);
+}
+
+.btn.danger {
+  color: #fff;
+  background: var(--red);
+  border-color: var(--red);
+}
+
+.app-shell {
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 180px 360px 1fr;
+  grid-template-rows: 52px 1fr;
+}
+
+.topbar {
+  grid-column: 1 / 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 16px;
+  background: linear-gradient(135deg, #12b7f5, #0d9bd4);
+  color: #fff;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+}
+
+.topbar .brand {
+  color: #fff;
+}
+
+.topbar .brand .brand-mark {
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  font-size: 18px;
+  color: #12b7f5;
+  background: #fff;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.top-actions select,
+.top-actions button {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+}
+
+.top-actions select {
+  height: 34px;
+  border-radius: 8px;
+}
+
+.top-actions button {
+  min-height: 34px;
+}
+
+.sidebar {
+  padding: 12px;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  overflow: auto;
+}
+
+.nav-button {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  margin-bottom: 6px;
+  color: var(--text);
+  background: transparent;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 14px;
+}
+
+.nav-button.active,
+.nav-button:hover {
+  color: var(--primary);
+  background: rgba(29, 115, 232, 0.12);
+}
+
+.nav-button .count {
+  margin-left: auto;
+  min-width: 24px;
+  padding: 2px 7px;
+  color: #fff;
+  background: var(--red);
+  border-radius: 999px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.workspace {
+  grid-column: 2 / 4;
+  overflow: auto;
+}
+
+.mail-layout {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+/* Inbox split mode: list-pane in the middle, reader-pane on the right */
+.workspace.inbox-split {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+}
+
+.workspace.inbox-split .reader-pane {
+  display: block;
+}
+
+.list-pane,
+.reader-pane,
+.page-pane {
+  min-width: 0;
+  overflow: auto;
+  background: var(--surface);
+}
+
+.list-pane {
+  border-right: 1px solid var(--line);
+}
+
+.toolbar {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.toolbar input {
+  flex: 1;
+  min-width: 120px;
+  height: 36px;
+  color: var(--text);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 11px;
+}
+
+.folder-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-soft);
+  overflow-x: auto;
+}
+
+.folder-tab {
+  min-height: 32px;
+  padding: 0 14px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.folder-tab:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.folder-tab.active {
+  color: #fff;
+  background: var(--primary);
+}
+
+.mail-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.mail-row:hover,
+.mail-row.active {
+  background: var(--surface-soft);
+}
+
+.mail-row.unread .mail-subject {
+  font-weight: 800;
+}
+
+.mail-subject,
+.mail-sender,
+.mail-snippet {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mail-sender,
+.mail-date,
+.mail-snippet,
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tag-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 12px;
+}
+
+.reader-empty {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  text-align: center;
+  padding: 28px;
+}
+
+.reader-head {
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.reader-head h2 {
+  margin: 0 0 10px;
+  font-size: 22px;
+}
+
+.reader-body {
+  padding: 20px;
+  line-height: 1.75;
+}
+
+.reader-body pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+}
+
+.reader-body iframe {
+  width: 100%;
+  min-height: 520px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.remote-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 12px;
+  background: rgba(244, 180, 0, 0.14);
+  border: 1px solid rgba(244, 180, 0, 0.35);
+  border-radius: 8px;
+}
+
+.page-pane {
+  overflow-y: auto;
+  height: calc(100vh - 56px);
+  padding: 18px;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.page-header h2 {
+  margin: 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.item-card {
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.item-card h3 {
+  margin: 0 0 8px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 10px 12px;
+}
+
+.form-grid .wide {
+  grid-column: 1 / -1;
+}
+
+.compose {
+  max-width: 980px;
+}
+
+.empty-state {
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  display: inline-block;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+#toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+}
+
+.toast {
+  max-width: 360px;
+  padding: 11px 13px;
+  color: #fff;
+  background: #182235;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.toast.error {
+  background: var(--red);
+}
+
+@media (max-width: 860px) {
+  .auth-page {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-hero {
+    min-height: 280px;
+  }
+
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: 52px auto 1fr;
+  }
+
+  .topbar {
+    grid-column: 1;
+  }
+
+  .sidebar {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .nav-button {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .workspace {
+    grid-column: 1;
+  }
+
+  .mail-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace.inbox-split {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(260px, 45%) 1fr;
+  }
+
+  .list-pane {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Calendar ── */
+.cal-title {
+  font-size: 1.15em;
+  font-weight: 700;
+  margin: 0 14px;
+  white-space: nowrap;
+}
+
+.cal-grid-wrapper {
+  padding: 12px;
+}
+
+.cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.cal-weekday.today {
+  color: var(--primary);
+}
+
+.cal-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.cal-day {
+  position: relative;
+  min-height: 80px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.cal-day:hover {
+  background: var(--surface-soft);
+}
+
+.cal-day.other-month {
+  color: var(--muted);
+  opacity: 0.45;
+  cursor: default;
+}
+
+.cal-day.today {
+  background: rgba(29, 115, 232, 0.08);
+  border-color: var(--primary);
+}
+
+.cal-day.today .cal-day-num {
+  color: #fff;
+  background: var(--primary);
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-weight: 700;
+}
+
+.cal-day-num {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.cal-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.cal-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+
+.cal-dot:hover {
+  transform: scale(1.5);
+}
+
+.cal-dot-more {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 8px;
+}
+
+/* Week View */
+.cal-week-view {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  min-height: 360px;
+}
+
+.cal-week-col {
+  border: 1px solid var(--line);
+  padding: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  min-height: 360px;
+}
+
+.cal-week-col:hover {
+  background: var(--surface-soft);
+}
+
+.cal-week-col.today {
+  background: rgba(29, 115, 232, 0.06);
+}
+
+.cal-week-col-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Day View */
+.cal-day-header {
+  padding: 12px 0;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cal-day-header.today h3 {
+  color: var(--primary);
+}
+
+.cal-day-header h3 {
+  margin: 0;
+}
+
+.cal-day-events {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Event Card */
+.cal-event-card {
+  padding: 8px 10px;
+  background: var(--surface-soft);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.cal-event-card:hover {
+  background: var(--surface);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.cal-event-time {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.cal-event-title {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-event-loc {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  width: min(460px, calc(100vw - 32px));
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+
+.modal h3 {
+  margin: 0 0 16px;
+}
+
+.modal .form-grid {
+  margin-bottom: 12px;
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Color Picker */
+.color-picker {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.color-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.15s, transform 0.12s;
+}
+
+.color-swatch:hover {
+  transform: scale(1.12);
+}
+
+.color-swatch.active {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text);
+}
+
+/* ── Tablet (≤1024px) ── */
+@media (max-width: 1024px) {
+  .app-shell { grid-template-columns: 180px 1fr; }
+
+  .page-pane { padding: 14px; }
+
+  .modal { max-width: 520px; }
+
+  /* 任务看板：纵向排列 */
+  .kanban-board { flex-direction: column; }
+  .kanban-col { min-width: unset; margin-bottom: 12px; }
+
+  /* 通讯录网格：2 列 */
+  .contacts-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* 便签网格：2 列 */
+  .notes-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* 写邮件：收件人/主题 单列 */
+  #compose-form .form-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Mobile (≤767px) ── */
+@media (max-width: 767px) {
+  /* 顶栏 */
+  .topbar { padding: 0 8px; flex-wrap: wrap; }
+  .brand { font-size: 16px; }
+  .top-actions { gap: 4px; }
+  .top-actions .btn { padding: 4px 8px; font-size: 12px; }
+
+  /* 侧栏 → 底部 tab bar */
+  .app-shell { grid-template-columns: 1fr; grid-template-rows: 1fr 56px; }
+  .sidebar {
+    grid-row: 2; grid-column: 1;
+    display: flex; flex-direction: row; overflow-x: auto;
+    padding: 0 4px; gap: 2px;
+    border-top: 1px solid var(--border, #ddd);
+    border-right: none;
+    height: 56px; width: 100%;
+  }
+  .sidebar .nav-button {
+    flex: 0 0 auto; padding: 6px 10px;
+    font-size: 11px; white-space: nowrap;
+    text-align: center; border-radius: 6px;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  .sidebar .nav-button .nav-icon { font-size: 18px; }
+
+  .page-pane { padding: 10px; }
+
+  /* 日历 */
+  .cal-weekdays { font-size: 11px; }
+  .cal-day { min-height: 36px; font-size: 12px; padding: 2px; }
+  .cal-dot { width: 5px; height: 5px; }
+  .cal-toolbar { flex-wrap: wrap; gap: 6px; }
+  .cal-toolbar .btn { padding: 4px 8px; font-size: 12px; }
+
+  /* 邮件列表 */
+  .mail-list .mail-row { padding: 8px 10px; }
+  .mail-list .mail-subject { font-size: 13px; }
+  .mail-list .mail-sender { font-size: 12px; }
+  .mail-list .mail-snippet { font-size: 11px; }
+
+  /* 邮件详情 */
+  .reader-pane { padding: 10px; }
+  .reader-head { flex-direction: column; gap: 6px; }
+
+  /* 表格/表单 */
+  .form-grid { grid-template-columns: 1fr; }
+  .item-card { padding: 12px; }
+
+  /* 按钮 */
+  .btn { padding: 6px 12px; font-size: 13px; }
+  .btn-row { flex-wrap: wrap; gap: 4px; }
+
+  /* Modal */
+  .modal { max-width: 92vw; margin: 20px auto; padding: 16px; }
+
+  /* 通讯录网格：1 列 */
+  .contacts-grid { grid-template-columns: 1fr; }
+
+  /* 便签网格：1 列 */
+  .notes-grid { grid-template-columns: 1fr; }
+
+  /* 登录页 */
+  .auth-page { grid-template-columns: 1fr; padding: 16px; }
+  .auth-hero { display: none; }
+  .auth-form { max-width: 100%; padding: 20px; }
+
+  /* 插件社区 */
+  .toolbar { flex-direction: column; gap: 6px; }
+  .toolbar input { width: 100%; }
+
+  /* 搜索框 */
+  #mail-search input { font-size: 13px; padding: 6px 10px; }
+}
+
+/* ── Desktop wide (≥1440px) ── */
+@media (min-width: 1440px) {
+  .app-shell { grid-template-columns: 220px 1fr; }
+  .page-pane { max-width: 1100px; margin: 0 auto; }
+  .notes-grid { grid-template-columns: repeat(4, 1fr); }
+  .contacts-grid { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* ── Cross-browser fixes ── */
+@-moz-document url-prefix() {
+  /* Firefox scrollbar style */
+  .sidebar, .mail-list { scrollbar-width: thin; scrollbar-color: var(--border, #ccc) transparent; }
+}
+
+@supports (-webkit-overflow-scrolling: touch) {
+  /* Safari/iOS smooth scroll */
+  .sidebar, .mail-list, .kanban-board { -webkit-overflow-scrolling: touch; }
+}
+
+/* ── 登录/注册页卡片式居中布局 ── */
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #ebf4ff 0%, #e8f5f0 50%, #fef9ef 100%);
+}
+
+.auth-card {
+  width: min(420px, calc(100vw - 32px));
+  padding: 32px 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.auth-card h1 {
+  margin: 0 0 8px;
+  font-size: 32px;
+}
+
+.auth-card .slogan {
+  margin: 0 0 20px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.auth-card .auth-form {
+  text-align: left;
+}
+
+.auth-card .btn.primary {
+  width: 100%;
+  margin-top: 8px;
+}
+
+/* ── 侧栏折叠与拖拽 ── */
+.sidebar-header {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 4px 8px 0;
+  margin-bottom: 4px;
+}
+
+.sidebar-collapse-btn {
+  min-height: 28px;
+  min-width: 28px;
+  padding: 0 6px;
+  font-size: 16px;
+}
+
+/* 折叠态侧栏 */
+.sidebar.collapsed .sidebar-header {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar.collapsed .nav-button {
+  justify-content: center;
+  padding: 0 4px;
+  min-height: 36px;
+}
+
+/* 拖拽手柄 hover 效果 */
+.sidebar-resize-handle:hover {
+  background: var(--primary) !important;
+}
+
+/* ── 写邮件格式工具栏 ── */
+.format-toolbar .btn {
+  min-height: 28px;
+  min-width: 28px;
+  padding: 0 6px;
+  font-size: 13px;
+}
+
+.format-toolbar .btn:hover {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}

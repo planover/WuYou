@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# WuYou local data
+backend/app/data/*
+!backend/app/data/.gitkeep
+backend/data/*
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+secret.key
+
+# Environment
+.env
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Brainstorm companion artifacts
+.superpowers/
+
+# WuYou additional data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+wuyou-data/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+node_modules/

@@ -120,12 +120,12 @@ async function api(path, options = {}) {
     localStorage.removeItem("wuyou.token");
     state.token = "";
     renderAuth();
-    throw new Error("请重新登录。");
+    throw new Error(t("auth.pleaseLogin", "请重新登录。"));
   }
   const contentType = response.headers.get("content-type") || "";
   const data = contentType.includes("application/json") ? await response.json() : await response.text();
   if (!response.ok) {
-    throw new Error(data.detail || data.message || data || "请求失败。");
+    throw new Error(data.detail || data.message || data || t("auth.requestFailed", "请求失败。"));
   }
   return data;
 }
@@ -154,12 +154,13 @@ function renderAuth(mode = "register") {
     <div class="auth-page">
       <div class="auth-card">
         <h1>📮 WuYou</h1>
-        <p class="slogan">你的邮件，都在坞里</p>
+        <p class="slogan">${t("about.slogan", "你的邮件，都在坞里")}</p>
         <div id="auth-form-area">
           ${authFields(mode)}
         </div>
         <p style="margin-top:16px;text-align:center">
           <a href="javascript:void(0)" id="switch-auth">${mode === "register" ? "已有账号？登录" : "还没有账号？注册"}</a>
+          ${mode === "login" ? `<br><a href="javascript:void(0)" id="forgot-password" style="font-size:13px;color:var(--muted)">${t("auth.forgotPassword", "忘记密码？")}</a>` : ""}
         </p>
       </div>
     </div>
@@ -169,6 +170,13 @@ function renderAuth(mode = "register") {
     e.preventDefault();
     renderAuth(mode === "register" ? "login" : "register");
   });
+
+  if (mode === "login") {
+    document.querySelector("#forgot-password").addEventListener("click", (e) => {
+      e.preventDefault();
+      showForgotPassword();
+    });
+  }
 
   // Tab 切换
   document.querySelectorAll("[data-auth]").forEach((button) => {
@@ -231,7 +239,7 @@ function renderAuth(mode = "register") {
         }
         if (!response.ok) {
           const data = await response.json();
-          throw new Error(data.detail || "发送失败");
+          throw new Error(data.detail || t("auth.sendFailPrefix", "发送失败"));
         }
         toast(email ? t("auth.codeSentEmail", "验证码已发送至邮箱") : t("auth.codeSentSms", "验证码已发送至手机"));
         _startCodeCountdown(this, 60);
@@ -247,17 +255,17 @@ function authFields(mode) {
     return `
       <form class="auth-form" id="auth-form">
         <div class="auth-tabs" style="justify-content:center">
-          <button type="button" data-auth="register" class="active">注册</button>
-          <button type="button" data-auth="login">登录</button>
+          <button type="button" data-auth="register" class="active">${t("auth.register", "注册")}</button>
+          <button type="button" data-auth="login">${t("auth.login", "登录")}</button>
         </div>
         <div class="field"><label>${t("auth.username", "用户名")}</label><input name="username" autocomplete="username" /></div>
         <div class="field"><label>${t("auth.email", "邮箱")}</label><input name="email" type="email" autocomplete="email" id="reg-email" /></div>
         <div class="field"><label>${t("auth.phone", "手机号")}</label><input name="phone" autocomplete="tel" id="reg-phone" /></div>
         <div class="field">
-          <label>验证码</label>
+          <label>${t("auth.verificationCode", "验证码")}</label>
           <div style="display:flex;gap:8px">
-            <input name="veri_code" placeholder="请输入验证码" style="flex:1" />
-            <button type="button" class="btn" id="send-code-btn">发送验证码</button>
+            <input name="veri_code" placeholder="${t("auth.enterCodeHint", "请输入验证码")}" style="flex:1" />
+            <button type="button" class="btn" id="send-code-btn">${t("auth.sendCode", "发送验证码")}</button>
           </div>
         </div>
         <div class="field"><label>${t("auth.password", "密码")}</label><input name="password" type="password" required minlength="8" autocomplete="new-password" /></div>
@@ -268,14 +276,130 @@ function authFields(mode) {
   return `
     <form class="auth-form" id="auth-form">
       <div class="auth-tabs" style="justify-content:center">
-        <button type="button" data-auth="register">注册</button>
-        <button type="button" data-auth="login" class="active">登录</button>
+        <button type="button" data-auth="register">${t("auth.register", "注册")}</button>
+        <button type="button" data-auth="login" class="active">${t("auth.login", "登录")}</button>
       </div>
       <div class="field"><label>${t("auth.identifier", "用户名 / 邮箱 / 手机号")}</label><input name="identifier" required autocomplete="username" /></div>
       <div class="field"><label>${t("auth.password", "密码")}</label><input name="password" type="password" required autocomplete="current-password" /></div>
       <button class="btn primary" type="submit" style="width:100%">${t("auth.login", "登录")}</button>
     </form>
   `;
+}
+
+function showForgotPassword() {
+  let step = 1;
+  let target = "";
+
+  function renderModal() {
+    const existing = document.querySelector("#forgot-password-modal");
+    if (existing) existing.remove();
+
+    let innerHTML = "";
+    if (step === 1) {
+      innerHTML = `
+        <h3>${t("auth.resetPasswordTitle", "忘记密码")}</h3>
+        <p class="muted">${t("auth.resetPasswordDesc", "请输入您注册时使用的邮箱或手机号，我们将发送验证码。")}</p>
+        <div class="field"><label>${t("auth.identifier", "邮箱 / 手机号")}</label><input id="reset-identifier" type="text" placeholder="user@example.com 或 13800138000" /></div>
+        <div class="btn-row">
+          <button class="btn" id="reset-cancel">${t("compose.cancel", "取消")}</button>
+          <button class="btn primary" id="reset-next">${t("auth.resetNext", "下一步")}</button>
+        </div>
+      `;
+    } else if (step === 2) {
+      innerHTML = `
+        <h3>${t("auth.enterCodeHint", "输入验证码")}</h3>
+        <p class="muted">${t("auth.resetCodeSent", "验证码已发送至 ")}<strong>${esc(target)}</strong>${t("auth.resetCodeSentExtra", "，10 分钟内有效。")}</p>
+        <div class="field">
+          <label>${t("auth.verificationCode", "验证码")}</label>
+          <div style="display:flex;gap:8px">
+            <input id="reset-code" placeholder="${t("auth.codePlaceholder", "6 位验证码")}" style="flex:1" />
+            <button type="button" class="btn" id="reset-resend-code">${t("auth.resetResend", "重新发送")}</button>
+          </div>
+        </div>
+        <div class="field"><label>${t("auth.resetNewPassword", "新密码")}</label><input id="reset-new-password" type="password" minlength="8" /></div>
+        <div class="btn-row">
+          <button class="btn" id="reset-back">${t("auth.resetBack", "上一步")}</button>
+          <button class="btn primary" id="reset-submit">${t("auth.resetPassword", "重置密码")}</button>
+        </div>
+      `;
+    }
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "forgot-password-modal";
+    overlay.innerHTML = `<div class="modal-card" style="max-width:420px">${innerHTML}</div>`;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    if (step === 1) {
+      document.querySelector("#reset-cancel").addEventListener("click", () => overlay.remove());
+      document.querySelector("#reset-next").addEventListener("click", async () => {
+        target = document.querySelector("#reset-identifier").value.trim();
+        if (!target) { toast(t("auth.enterEmailOrPhone", "请输入邮箱或手机号"), "error"); return; }
+        const isEmail = target.includes("@");
+        try {
+          await fetch("/api/auth/verification-code", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              target_type: isEmail ? "email" : "phone",
+              target,
+              purpose: "reset_password",
+            }),
+          });
+          step = 2;
+          renderModal();
+        } catch (err) {
+          toast(t("auth.sendCodeFailPrefix", "发送验证码失败: ") + err.message, "error");
+        }
+      });
+    } else if (step === 2) {
+      document.querySelector("#reset-back").addEventListener("click", () => {
+        step = 1;
+        renderModal();
+      });
+      document.querySelector("#reset-resend-code").addEventListener("click", async () => {
+        const isEmail = target.includes("@");
+        try {
+          await fetch("/api/auth/verification-code", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              target_type: isEmail ? "email" : "phone",
+              target,
+              purpose: "reset_password",
+            }),
+          });
+          toast(t("auth.resetResendSuccess", "验证码已重新发送"));
+        } catch (err) {
+          toast(t("auth.sendFailPrefix", "发送失败: ") + err.message, "error");
+        }
+      });
+      document.querySelector("#reset-submit").addEventListener("click", async () => {
+        const code = document.querySelector("#reset-code").value.trim();
+        const newPassword = document.querySelector("#reset-new-password").value;
+        if (!code) { toast(t("auth.enterCodeHint", "请输入验证码"), "error"); return; }
+        if (newPassword.length < 8) { toast(t("auth.passwordMinLength", "新密码至少 8 位"), "error"); return; }
+        try {
+          await fetch("/api/auth/reset-password", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ identifier: target, code, new_password: newPassword }),
+          });
+          toast(t("auth.resetPasswordSuccess", "密码已重置，请登录"));
+          overlay.remove();
+          renderAuth("login");
+        } catch (err) {
+          toast(t("auth.resetFailPrefix", "重置失败: ") + err.message, "error");
+        }
+      });
+    }
+  }
+
+  renderModal();
 }
 
 let _countdownTimer = null;
@@ -290,7 +414,7 @@ function _startCodeCountdown(button, seconds) {
     if (remaining <= 0) {
       clearInterval(_countdownTimer);
       button.disabled = false;
-      button.textContent = "\u53D1\u9001\u9A8C\u8BC1\u7801";
+      button.textContent = t("auth.sendCode", "\u53D1\u9001\u9A8C\u8BC1\u7801");
     } else {
       button.textContent = `${remaining}s`;
     }
@@ -333,7 +457,7 @@ function renderShell() {
       </header>
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
-          <button class="btn sidebar-collapse-btn" id="sidebar-collapse" title="折叠侧栏">☰</button>
+          <button class="btn sidebar-collapse-btn" id="sidebar-collapse" title="${t('shell.collapseSidebar','折叠侧栏')}">☰</button>
         </div>
         ${views
           .map(
@@ -475,6 +599,8 @@ async function route(view) {
   return renderAbout();
 }
 
+const inboxFilters = { sender: "", dateFrom: "", dateTo: "", hasAttachments: false };
+
 async function renderInbox(status = "all", query = "", folderRole = null) {
   if (folderRole !== null) state.folderRole = folderRole;
   const role = state.folderRole;
@@ -488,9 +614,17 @@ async function renderInbox(status = "all", query = "", folderRole = null) {
           <button class="btn" id="sync-all">${t("mail.sync", "同步")}</button>
           <button class="btn" id="show-sync-jobs">&#128260; ${t("sync.jobs", "同步任务")}</button>
         </div>
+        <div class="filter-bar" id="inbox-filter-bar" style="display:flex;gap:6px;padding:6px 8px;flex-wrap:wrap;font-size:12px;background:var(--surface);border-bottom:1px solid var(--border)">
+          <input id="filter-sender" placeholder="${t("mail.filterSender", "发件人")}" value="${esc(inboxFilters.sender)}" style="width:140px;padding:4px 8px" />
+          <input type="date" id="filter-date-from" value="${inboxFilters.dateFrom}" style="width:130px;padding:4px 8px" />
+          <input type="date" id="filter-date-to" value="${inboxFilters.dateTo}" style="width:130px;padding:4px 8px" />
+          <label style="display:flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" id="filter-attachments" ${inboxFilters.hasAttachments ? "checked" : ""} /> ${t("mail.hasAttachments", "带附件")}</label>
+          <button class="btn" id="filter-apply" style="padding:2px 8px">${t("mail.filterApply", "筛选")}</button>
+          <button class="btn" id="filter-clear" style="padding:2px 8px">${t("mail.filterClear", "清除")}</button>
+        </div>
         <div class="folder-tabs">
           ${["all","inbox","sent","trash","archive","junk"].map((r) => {
-            const labels = { all: "\u5168\u90E8", inbox: "\u6536\u4EF6\u7BB1", sent: "\u5DF2\u53D1\u9001", trash: "\u5783\u573E\u7BB1", archive: "\u5F52\u6863", junk: "\u5783\u573E\u90AE\u4EF6" };
+            const labels = { all: t("mail.folderAll", "全部"), inbox: t("mail.folderInbox", "收件箱"), sent: t("mail.folderSent", "已发送"), trash: t("mail.folderTrash", "垃圾箱"), archive: t("mail.folderArchive", "归档"), junk: t("mail.folderJunk", "垃圾邮件") };
             return `<button class="folder-tab ${role === r ? "active" : ""}" data-folder="${r}">${labels[r]}</button>`;
           }).join("")}
         </div>
@@ -507,13 +641,48 @@ async function renderInbox(status = "all", query = "", folderRole = null) {
   document.querySelectorAll(".folder-tab").forEach((btn) => {
     btn.addEventListener("click", () => renderInbox(status, query, btn.dataset.folder));
   });
+  document.querySelector("#filter-apply").addEventListener("click", () => {
+    inboxFilters.sender = document.querySelector("#filter-sender")?.value?.trim() || "";
+    inboxFilters.dateFrom = document.querySelector("#filter-date-from")?.value || "";
+    inboxFilters.dateTo = document.querySelector("#filter-date-to")?.value || "";
+    inboxFilters.hasAttachments = document.querySelector("#filter-attachments")?.checked || false;
+    renderInbox(status, query, role);
+  });
+  document.querySelector("#filter-clear").addEventListener("click", () => {
+    inboxFilters.sender = "";
+    inboxFilters.dateFrom = "";
+    inboxFilters.dateTo = "";
+    inboxFilters.hasAttachments = false;
+    renderInbox(status, query, role);
+  });
   try {
     const params = new URLSearchParams({ status, q: query, folder_role: role });
-    state.messages = await api(`/api/mail/inbox?${params.toString()}`);
+    const allMessages = await api(`/api/mail/inbox?${params.toString()}`);
+    state.messages = applyInboxFilters(allMessages);
     renderMessageList();
   } catch (error) {
     toast(error.message, "error");
   }
+}
+
+function applyInboxFilters(messages) {
+  return messages.filter((msg) => {
+    if (inboxFilters.sender && !(msg.sender || "").toLowerCase().includes(inboxFilters.sender.toLowerCase())) return false;
+    if (inboxFilters.dateFrom && msg.received_at) {
+      const msgDate = new Date(msg.received_at);
+      const fromDate = new Date(inboxFilters.dateFrom);
+      fromDate.setHours(0, 0, 0, 0);
+      if (msgDate < fromDate) return false;
+    }
+    if (inboxFilters.dateTo && msg.received_at) {
+      const msgDate = new Date(msg.received_at);
+      const toDate = new Date(inboxFilters.dateTo);
+      toDate.setHours(23, 59, 59, 999);
+      if (msgDate > toDate) return false;
+    }
+    if (inboxFilters.hasAttachments && (!msg.has_attachments && !(msg.attachments && msg.attachments.length > 0))) return false;
+    return true;
+  });
 }
 
 function renderMessageList() {
@@ -643,19 +812,19 @@ async function syncAll() {
         updateToast(`${account.display_name}: ${t("mail.syncing", "正在同步...")}`);
         pollJobStatus(result.job_id, (job) => {
           if (!job) {
-            updateToast(`${account.display_name}: \u540C\u6B65\u8D85\u65F6\uFF0C\u8BF7\u624B\u52A8\u5237\u65B0\u3002`);
+            updateToast(`${account.display_name}: ${t("sync.timeout","同步超时，请手动刷新。")}`);
             return;
           }
           if (job.status === "success" || job.status === "completed") {
             const stats = job.stats_json ? (typeof job.stats_json === "string" ? JSON.parse(job.stats_json) : job.stats_json) : {};
             const newCount = stats.new_messages || 0;
-            updateToast(`${account.display_name}: \u540C\u6B65\u5B8C\u6210\uFF08\u65B0\u589E${newCount}\u5C01\uFF09`);
+            updateToast(`${account.display_name}: ${t("sync.completedNew","同步完成（新增{newCount}封）").replace("{newCount}", newCount)}`);
             loadCommon().then(() => {
               renderShell();
               route(state.view);
             });
           } else if (job.status === "failed") {
-            updateToast(`${account.display_name}: \u540C\u6B65\u5931\u8D25\uFF1A${job.error || "\u672A\u77E5\u9519\u8BEF"}`);
+            updateToast(`${account.display_name}: ${t("sync.failed","同步失败：{error}").replace("{error}", job.error || t("sync.unknownError","未知错误"))}`);
           }
         });
       } else {
@@ -683,7 +852,7 @@ async function renderCalendar() {
       <div class="page-header"><h2>${t("nav.calendar", "日历")}</h2></div>
       <div class="toolbar">
         <button class="btn" id="cal-prev">← ${t("calendar.prev", "上一月")}</button>
-        <span class="cal-title">${year}年${month + 1}月</span>
+        <span class="cal-title">${year}${t("calendar.year","年")}${month + 1}${t("calendar.month","月")}</span>
         <button class="btn" id="cal-next">${t("calendar.next", "下一月")} →</button>
         <button class="btn primary" id="cal-today">${t("calendar.today", "今天")}</button>
         <select id="cal-view-mode">
@@ -751,7 +920,7 @@ function renderMonthGrid(year, month) {
   const startOffset = firstDay === 0 ? 6 : firstDay - 1;
 
   let html = '<div class="cal-weekdays">';
-  ["一", "二", "三", "四", "五", "六", "日"].forEach((d) => {
+  [t("calendar.weekdayMon","一"), t("calendar.weekdayTue","二"), t("calendar.weekdayWed","三"), t("calendar.weekdayThu","四"), t("calendar.weekdayFri","五"), t("calendar.weekdaySat","六"), t("calendar.weekdaySun","日")].forEach((d) => {
     html += `<div class="cal-weekday">${d}</div>`;
   });
   html += "</div>";
@@ -837,12 +1006,12 @@ function renderWeekGrid(year, month) {
   });
 
   let html = '<div class="cal-weekdays">';
-  ["一", "二", "三", "四", "五", "六", "日"].forEach((d, i) => {
+  [t("calendar.weekdayMon","一"), t("calendar.weekdayTue","二"), t("calendar.weekdayWed","三"), t("calendar.weekdayThu","四"), t("calendar.weekdayFri","五"), t("calendar.weekdaySat","六"), t("calendar.weekdaySun","日")].forEach((d, i) => {
     const date = new Date(startOfWeek);
     date.setDate(date.getDate() + i);
     const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
     const isToday = date.toDateString() === today.toDateString();
-    html += `<div class="cal-weekday${isToday ? " today" : ""}">${d} ${date.getDate()}日</div>`;
+    html += `<div class="cal-weekday${isToday ? " today" : ""}">${d} ${date.getDate()}${t("calendar.day","日")}</div>`;
   });
   html += "</div><div class='cal-week cal-week-view'>";
 
@@ -901,7 +1070,7 @@ function renderDayGrid(year, month) {
   });
 
   let html = `<div class="cal-day-header${isToday ? " today" : ""}">
-    <h3>${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${["日", "一", "二", "三", "四", "五", "六"][date.getDay()]}</h3>
+    <h3>${date.getFullYear()}${t("calendar.year","年")}${date.getMonth() + 1}${t("calendar.month","月")}${date.getDate()}${t("calendar.day","日")} ${["日", "一", "二", "三", "四", "五", "六"][date.getDay()]}</h3>
   </div>`;
 
   if (!dayEvents.length) {
@@ -912,7 +1081,7 @@ function renderDayGrid(year, month) {
       const emeta = ev.meta_json || {};
       const startTime = emeta.start_at ? String(emeta.start_at).slice(11, 16) : "";
       const endTime = emeta.end_at ? String(emeta.end_at).slice(11, 16) : "";
-      const timeStr = emeta.all_day ? "全天" : `${startTime}${endTime ? " - " + endTime : ""}`;
+      const timeStr = emeta.all_day ? t("calendar.allDay","全天") : `${startTime}${endTime ? " - " + endTime : ""}`;
       html += `<div class="cal-event-card" data-event-id="${ev.id}" style="border-left:3px solid ${esc(emeta.color || "#4A90D9")}">
         <div class="cal-event-time">${esc(timeStr)}</div>
         <div class="cal-event-title">${esc(ev.title)}</div>
@@ -1036,7 +1205,7 @@ function showEventModal(dateStr, existingEvent) {
 
   if (isEdit) {
     overlay.querySelector("#cal-ev-delete").addEventListener("click", async () => {
-      if (!confirm("确定要删除该事件吗？")) return;
+      if (!confirm(t("calendar.deleteConfirm","确定要删除该事件吗？"))) return;
       try {
         await api(`/api/items/${eventId}`, { method: "DELETE" });
         overlay.remove();
@@ -1065,12 +1234,20 @@ function renderCompose() {
           <div class="field wide">
             <label>${t("compose.body", "正文")}</label>
             <div class="format-toolbar" style="margin-bottom:8px;display:flex;gap:4px">
-              <button type="button" class="btn" data-format="bold" title="加粗"><b>B</b></button>
-              <button type="button" class="btn" data-format="italic" title="斜体"><i>I</i></button>
-              <button type="button" class="btn" data-format="list" title="无序列表">•</button>
-              <button type="button" class="btn" data-format="link" title="插入链接">🔗</button>
+              <button type="button" class="btn" data-format="bold" title="${t("compose.toolbarBold","加粗")}"><b>B</b></button>
+              <button type="button" class="btn" data-format="italic" title="${t("compose.toolbarItalic","斜体")}"><i>I</i></button>
+              <button type="button" class="btn" data-format="list" title="${t("compose.toolbarList","无序列表")}">•</button>
+              <button type="button" class="btn" data-format="link" title="${t("compose.toolbarLink","插入链接")}">🔗</button>
             </div>
             <textarea name="body" id="compose-body">${esc(draft.body || "")}</textarea>
+          </div>
+          <div class="field wide">
+            <label>${t("compose.attachments", "附件")}</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="file" id="compose-attachment-input" multiple style="flex:1" />
+              <button type="button" class="btn" id="compose-upload-attachment">${t("compose.uploadBtn","上传")}</button>
+            </div>
+            <div id="compose-attachments-list" style="margin-top:8px;font-size:12px"></div>
           </div>
         </div>
         <div class="btn-row" style="justify-content:flex-start">
@@ -1099,6 +1276,44 @@ function renderCompose() {
       ta.setRangeText(before + selected + after, start, end, "select");
       ta.focus();
     });
+  });
+
+  // ── 附件上传 ──
+  const composeAttachments = [];
+  function renderAttachmentList() {
+    const listEl = document.querySelector("#compose-attachments-list");
+    if (!listEl) return;
+    listEl.innerHTML = composeAttachments.map((a, i) =>
+      `<span style="display:inline-block;margin-right:8px;padding:2px 8px;background:var(--surface);border-radius:4px">${esc(a.filename)} (${(a.size / 1024).toFixed(1)} KB) <a href="javascript:void(0)" data-remove-att="${i}" style="color:var(--red);margin-left:4px">✕</a></span>`
+    ).join("");
+    document.querySelectorAll("[data-remove-att]").forEach((link) => {
+      link.addEventListener("click", () => {
+        composeAttachments.splice(parseInt(link.dataset.removeAtt), 1);
+        renderAttachmentList();
+      });
+    });
+  }
+
+  document.querySelector("#compose-upload-attachment").addEventListener("click", async () => {
+    const fileInput = document.querySelector("#compose-attachment-input");
+    const files = fileInput.files;
+    if (!files || files.length === 0) { toast(t("compose.selectFile","请选择文件"), "error"); return; }
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const result = await api("/api/mail/attachments", {
+          method: "POST",
+          body: formData,
+          headers: {},
+        });
+        composeAttachments.push({ id: result.id, filename: result.filename, size: result.size });
+      } catch (err) {
+        toast(t("compose.uploadFailPrefix","上传失败: ") + err.message, "error");
+      }
+    }
+    renderAttachmentList();
+    fileInput.value = "";
   });
 
   // ── 保存草稿 ──
@@ -1138,6 +1353,7 @@ function renderCompose() {
         body: form.get("body"),
         format: form.get("format"),
         encryption_mode: form.get("encryption_mode"),
+        attachment_ids: composeAttachments.map((a) => a.id),
       };
       const result = await api("/api/mail/send", { method: "POST", body: payload });
       toast(result.message);
@@ -1159,17 +1375,17 @@ async function renderAccounts() {
     <section class="page-pane">
       <div class="page-header"><h2>${t("accounts.title", "邮箱账户")}</h2></div>
       <div class="grid" id="accounts-grid">
-        <div class="empty-state">加载中...</div>
+        <div class="empty-state">${t("common.loading", "加载中...")}</div>
       </div>
       <form class="panel item-card" id="account-form" style="margin-top:14px">
         <h3>${t("accounts.add", "添加邮箱账户")}</h3>
         <div class="form-grid">
           <div class="field"><label>${t("accounts.display", "显示名称")}</label><input name="display_name" required /></div>
-          <div class="field"><label>${t("accounts.email", "邮箱地址")}</label><input name="email_address" type="email" required /></div>
-          <div class="field"><label>${t("accounts.auth", "登录方式")}</label><select name="auth_type"><option value="app_password">授权码</option><option value="password">密码</option><option value="key">密钥</option><option value="oauth2">OAuth2</option><option value="sms_code">手机验证码</option></select></div>
+          <div class="field"><label>${t("accounts.email", "邮箱地址")}</label><div style="display:flex;gap:8px"><input name="email_address" type="email" required style="flex:1" /><button type="button" class="btn" id="auto-detect-config" style="white-space:nowrap;font-size:12px">${t("accounts.autoDetectBtn","🔍 自动检测配置")}</button></div></div>
+          <div class="field"><label>${t("accounts.auth", "登录方式")}</label><select name="auth_type"><option value="app_password">${t("accounts.authAppPassword","授权码")}</option><option value="password">${t("accounts.authPassword","密码")}</option><option value="key">${t("accounts.authKey","密钥")}</option><option value="oauth2">OAuth2</option><option value="sms_code">${t("accounts.authSmsCode","手机验证码")}</option></select></div>
           <div id="oauth-provider-row" style="display:none">
             <label>${t("auth.oauthProvider", "选择服务商")}</label>
-            <select id="oauth-provider"><option value="">请选择</option></select>
+            <select id="oauth-provider"><option value="">${t("accounts.selectProvider","请选择")}</option></select>
             <button class="btn primary" id="oauth-connect-btn" type="button">${t("auth.oauthConnect", "连接")}</button>
           </div>
           <div class="field"><label>${t("accounts.secret", "密码 / 授权码 / 密钥")}</label><input name="secret" type="password" required /></div>
@@ -1203,27 +1419,35 @@ async function renderAccounts() {
     );
     grid.innerHTML = accountsWithJobs
       .map(({ account: acct, lastJob }) => {
-        let statusText = "未知";
+        let statusText = t("accounts.statusUnknown", "未知");
         let statusColor = "var(--muted)";
-        let lastSync = "从未";
+        let lastSync = t("accounts.lastSyncNever", "从未");
         let errorMsg = "";
         if (lastJob) {
-          if (lastJob.status === "success") { statusText = "在线"; statusColor = "var(--green)"; }
-          else if (lastJob.status === "failed" || lastJob.status === "canceled") { statusText = "错误"; statusColor = "var(--red)"; }
-          else if (lastJob.status === "running") { statusText = "同步中..."; statusColor = "var(--yellow)"; }
-          else if (lastJob.status === "queued") { statusText = "等待中"; statusColor = "var(--yellow)"; }
-          else { statusText = "离线"; statusColor = "var(--muted)"; }
+          if (lastJob.status === "success") { statusText = t("accounts.statusOnline", "在线"); statusColor = "var(--green)"; }
+          else if (lastJob.status === "failed" || lastJob.status === "canceled") { statusText = t("accounts.statusError", "错误"); statusColor = "var(--red)"; }
+          else if (lastJob.status === "running") { statusText = t("accounts.statusSyncing", "同步中..."); statusColor = "var(--yellow)"; }
+          else if (lastJob.status === "queued") { statusText = t("accounts.statusPending", "等待中"); statusColor = "var(--yellow)"; }
+          else { statusText = t("accounts.statusOffline", "离线"); statusColor = "var(--muted)"; }
           if (lastJob.finished_at) lastSync = new Date(lastJob.finished_at).toLocaleString();
           if (lastJob.error) errorMsg = `<div style="color:var(--red);font-size:11px;margin-top:4px">${esc(lastJob.error)}</div>`;
         }
         return `
           <article class="item-card">
-            <h3>${esc(acct.display_name)}</h3>
-            <p>${esc(acct.email_address)}</p>
-            <p class="muted">${esc(acct.provider)} · IMAP ${esc(acct.imap_host)} · SMTP ${esc(acct.smtp_host)}</p>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+              <div>
+                <h3>${esc(acct.display_name)}</h3>
+                <p>${esc(acct.email_address)}</p>
+                <p class="muted">${esc(acct.provider)} · IMAP ${esc(acct.imap_host)} · SMTP ${esc(acct.smtp_host)}</p>
+              </div>
+              <div style="display:flex;gap:4px;flex-shrink:0">
+                <button class="btn" data-edit-acct="${acct.id}" data-display="${esc(acct.display_name)}" data-email="${esc(acct.email_address)}" data-auth="${esc(acct.auth_type)}" data-imap="${esc(acct.imap_host)}" data-smtp="${esc(acct.smtp_host)}" style="font-size:11px;padding:2px 8px">✏️</button>
+                <button class="btn" data-del-acct="${acct.id}" style="font-size:11px;padding:2px 8px;color:var(--red)">🗑</button>
+              </div>
+            </div>
             <div class="account-status" style="margin-top:8px;font-size:12px">
               <span style="color:${statusColor}">&bull; ${statusText}</span>
-              <span class="muted"> | 上次同步: ${lastSync}</span>
+              <span class="muted"> | ${t("accounts.lastSyncPrefix", "上次同步: ")}${lastSync}</span>
               <button class="btn" data-sync-acct="${acct.id}" style="font-size:11px;padding:2px 8px;margin-left:8px">${t("mail.sync", "同步")}</button>
               ${lastJob && lastJob.status === "running" ? '<span style="margin-left:6px;display:inline-block;width:12px;height:12px;border:2px solid var(--muted);border-top-color:var(--primary);border-radius:50%;animation:loading 0.8s linear infinite"></span>' : ""}
             </div>
@@ -1240,13 +1464,13 @@ async function renderAccounts() {
     button.addEventListener("click", async () => {
       const btn = button;
       btn.disabled = true;
-      btn.textContent = "同步中...";
+      btn.textContent = t("accounts.statusSyncing", "同步中...");
       try {
         await api("/api/sync/jobs", {
           method: "POST",
           body: { mailbox_id: parseInt(btn.dataset.syncAcct) },
         });
-        toast("已加入同步队列");
+        toast(t("accounts.syncQueued", "已加入同步队列"));
         setTimeout(() => renderAccounts(), 1500);
       } catch (error) {
         toast(error.message, "error");
@@ -1290,7 +1514,7 @@ async function renderAccounts() {
         try {
           const providers = await api("/api/auth/oauth/providers");
           const sel = document.querySelector("#oauth-provider");
-          sel.innerHTML = '<option value="">请选择</option>' +
+          sel.innerHTML = '<option value="">' + t("accounts.selectProvider","请选择") + '</option>' +
             (providers.providers || []).map((p) => `<option value="${esc(p.id || p.name)}">${esc(p.name)}</option>`).join("");
         } catch (err) {
           toast(err.message, "error");
@@ -1306,10 +1530,69 @@ async function renderAccounts() {
   if (oauthConnectBtn) {
     oauthConnectBtn.addEventListener("click", async () => {
       const provider = document.querySelector("#oauth-provider")?.value;
-      if (!provider) { toast("请选择服务商", "error"); return; }
+      if (!provider) { toast(t("accounts.selectProviderHint","请选择服务商"), "error"); return; }
       try {
         const result = await api(`/api/auth/oauth/authorize?provider=${encodeURIComponent(provider)}&redirect_to=`);
         window.location.href = result.auth_url;
+      } catch (err) {
+        toast(err.message, "error");
+      }
+    });
+  }
+
+  // Delete account
+  document.querySelectorAll("[data-del-acct]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.delAcct;
+      if (!confirm("确定要删除该邮箱账户吗？此操作不可撤销。")) return;
+      try {
+        await api(`/api/accounts/${id}`, { method: "DELETE" });
+        await loadCommon();
+        renderShell();
+        route("accounts");
+        toast("邮箱账户已删除。");
+      } catch (err) {
+        toast(err.message, "error");
+      }
+    });
+  });
+
+  // Edit account
+  document.querySelectorAll("[data-edit-acct]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      showEditAccountModal({
+        id: parseInt(btn.dataset.editAcct),
+        display_name: btn.dataset.display,
+        email_address: btn.dataset.email,
+        auth_type: btn.dataset.auth,
+        imap_host: btn.dataset.imap,
+        smtp_host: btn.dataset.smtp,
+      });
+    });
+  });
+
+  // Auto-detect config button
+  const autoDetectBtn = document.querySelector("#auto-detect-config");
+  if (autoDetectBtn) {
+    autoDetectBtn.addEventListener("click", async () => {
+      const email = document.querySelector('#account-form input[name="email_address"]')?.value?.trim();
+      if (!email || !email.includes("@")) { toast("请先输入邮箱地址", "error"); return; }
+      try {
+        const result = await api(`/api/accounts/providers`);
+        const domain = email.split("@")[1]?.toLowerCase();
+        const matched = (result.providers || []).find((p) => {
+          const domains = p.domains || [];
+          return domains.some((d) => d.toLowerCase() === domain);
+        });
+        if (matched) {
+          const imapInput = document.querySelector('#account-form input[name="imap_host"]');
+          const smtpInput = document.querySelector('#account-form input[name="smtp_host"]');
+          if (imapInput) imapInput.value = matched.imap?.host || "";
+          if (smtpInput) smtpInput.value = matched.smtp?.host || "";
+          toast(`已自动匹配服务商: ${matched.name || matched.id}`);
+        } else {
+          toast("未识别该邮箱服务商，请手动填写 IMAP/SMTP。", "error");
+        }
       } catch (err) {
         toast(err.message, "error");
       }
@@ -1402,7 +1685,7 @@ async function renderPlugins() {
         try {
           const pluginId = button.dataset.enable;
           await api(`/api/plugins/${encodeURIComponent(pluginId)}/enable`, { method: "POST" });
-          toast("插件已启用。");
+          toast(t("plugins.enabledToast","插件已启用。"));
           renderPlugins();
         } catch (error) {
           toast(error.message, "error");
@@ -1416,7 +1699,7 @@ async function renderPlugins() {
         try {
           const pluginId = button.dataset.disable;
           await api(`/api/plugins/${encodeURIComponent(pluginId)}/disable`, { method: "POST" });
-          toast("插件已停用。");
+          toast(t("plugins.disabledToast","插件已停用。"));
           renderPlugins();
         } catch (error) {
           toast(error.message, "error");
@@ -1429,9 +1712,9 @@ async function renderPlugins() {
       button.addEventListener("click", async () => {
         try {
           const info = JSON.parse(button.dataset.uninstall);
-          if (!confirm(`确定要卸载 "${info.name}" 吗？此操作不可撤销。`)) return;
+          if (!confirm(t("plugins.uninstallConfirm","确定要卸载 \"{name}\" 吗？此操作不可撤销。").replace("{name}", info.name))) return;
           await api(`/api/plugins/${encodeURIComponent(info.plugin_id)}`, { method: "DELETE" });
-          toast("插件已卸载。");
+          toast(t("plugins.uninstalledToast","插件已卸载。"));
           renderPlugins();
         } catch (error) {
           toast(error.message, "error");
@@ -1457,7 +1740,7 @@ async function renderPlugins() {
               },
             },
           });
-          toast("分享已提交，等待审核。");
+          toast(t("plugins.shareSubmittedToast","分享已提交，等待审核。"));
         } catch (error) {
           toast(error.message, "error");
         }
@@ -1466,6 +1749,64 @@ async function renderPlugins() {
   } catch (error) {
     toast(error.message, "error");
   }
+}
+
+function showEditAccountModal(acct) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-card" style="max-width:480px">
+      <h3>${t("accounts.editTitle","编辑邮箱账户")}</h3>
+      <form id="edit-account-form">
+        <div class="form-grid">
+          <div class="field"><label>${t("accounts.display","显示名称")}</label><input name="display_name" value="${esc(acct.display_name)}" required /></div>
+          <div class="field"><label>${t("accounts.email","邮箱地址")}</label><input name="email_address" type="email" value="${esc(acct.email_address)}" required /></div>
+          <div class="field"><label>${t("accounts.auth","登录方式")}</label><select name="auth_type">
+            <option value="app_password" ${acct.auth_type === "app_password" ? "selected" : ""}>${t("accounts.authAppPassword","授权码")}</option>
+            <option value="password" ${acct.auth_type === "password" ? "selected" : ""}>${t("accounts.authPassword","密码")}</option>
+            <option value="key" ${acct.auth_type === "key" ? "selected" : ""}>${t("accounts.authKey","密钥")}</option>
+            <option value="oauth2" ${acct.auth_type === "oauth2" ? "selected" : ""}>OAuth2</option>
+            <option value="sms_code" ${acct.auth_type === "sms_code" ? "selected" : ""}>${t("accounts.authSmsCode","手机验证码")}</option>
+          </select></div>
+          <div class="field"><label>${t("accounts.newPasswordHint","新密码（留空不修改）")}</label><input name="secret" type="password" /></div>
+          <div class="field"><label>IMAP Host</label><input name="imap_host" value="${esc(acct.imap_host || "")}" /></div>
+          <div class="field"><label>SMTP Host</label><input name="smtp_host" value="${esc(acct.smtp_host || "")}" /></div>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn" id="edit-cancel">${t("common.cancel","取消")}</button>
+          <button type="submit" class="btn primary">${t("common.save","保存")}</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector("#edit-cancel").addEventListener("click", () => overlay.remove());
+
+  overlay.querySelector("#edit-account-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const body = {
+      display_name: form.get("display_name"),
+      email_address: form.get("email_address"),
+      auth_type: form.get("auth_type"),
+      imap_host: form.get("imap_host") || null,
+      smtp_host: form.get("smtp_host") || null,
+    };
+    const secret = form.get("secret");
+    if (secret) body.secret = secret;
+    try {
+      await api(`/api/accounts/${acct.id}`, { method: "PUT", body });
+      await loadCommon();
+      renderShell();
+      route("accounts");
+      toast("邮箱账户已更新。");
+      overlay.remove();
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  });
 }
 
 async function renderSettings() {
@@ -1507,16 +1848,16 @@ async function renderSettings() {
       </div>
       <div class="form-group">
         <label>${t("settings.changePassword","修改密码")}</label>
-        <input type="password" id="set-old-pw" placeholder="原密码">
-        <input type="password" id="set-new-pw" placeholder="新密码 (至少8位)">
+        <input type="password" id="set-old-pw" placeholder="${t('settings.oldPassword','原密码')}">
+        <input type="password" id="set-new-pw" placeholder="${t('settings.newPassword','新密码 (至少8位)')}">
         <button class="btn primary" id="btn-change-pw">${t("settings.save","保存")}</button>
       </div>
       <div class="form-group">
         <label>${t("settings.changeEmail","修改邮箱")}</label>
-        <input type="email" id="set-new-email" placeholder="新邮箱">
-        <button class="btn primary" id="btn-send-email-code">发送验证码</button>
-        <input type="text" id="set-email-code" placeholder="验证码" maxlength="6">
-        <button class="btn" id="btn-confirm-email">确认修改</button>
+        <input type="email" id="set-new-email" placeholder="${t('settings.newEmail','新邮箱')}">
+        <button class="btn primary" id="btn-send-email-code">${t("auth.sendCode","发送验证码")}</button>
+        <input type="text" id="set-email-code" placeholder="${t('settings.emailCode','验证码')}" maxlength="6">
+        <button class="btn" id="btn-confirm-email">${t("settings.confirmChange","确认修改")}</button>
       </div>
       <div class="btn-row">
         <button class="btn primary" id="btn-save-settings">${t("settings.saveAll","保存设置")}</button>
@@ -1554,8 +1895,8 @@ async function renderSettings() {
   document.getElementById("btn-change-pw").onclick = async () => {
     const old = document.getElementById("set-old-pw").value;
     const news = document.getElementById("set-new-pw").value;
-    if (!old || !news) return toast("请填写原密码和新密码", "error");
-    if (news.length < 8) return toast("新密码至少8位", "error");
+    if (!old || !news) return toast(t("settings.fillOldNewPassword","请填写原密码和新密码"), "error");
+    if (news.length < 8) return toast(t("settings.passwordMinLengthHint","新密码至少8位"), "error");
     const r = await api("/api/auth/change-password", { method: "PUT", body: {old_password: old, new_password: news} });
     if (r.message) toast(r.message, "ok");
     document.getElementById("set-old-pw").value = "";
@@ -1564,7 +1905,7 @@ async function renderSettings() {
 
   document.getElementById("btn-send-email-code").onclick = async () => {
     const email = document.getElementById("set-new-email").value.trim();
-    if (!email || !email.includes("@")) return toast("请输入有效邮箱", "error");
+    if (!email || !email.includes("@")) return toast(t("settings.enterValidEmail","请输入有效邮箱"), "error");
     const r = await api("/api/auth/verification-code", { method: "POST", body: {target_type:"email", target:email, purpose:"change_contact"} });
     if (r.message) toast(r.message, "ok");
   };
@@ -1572,7 +1913,7 @@ async function renderSettings() {
   document.getElementById("btn-confirm-email").onclick = async () => {
     const email = document.getElementById("set-new-email").value.trim();
     const code = document.getElementById("set-email-code").value.trim();
-    if (!email || !code) return toast("请填写邮箱和验证码", "error");
+    if (!email || !code) return toast(t("settings.fillEmailCode","请填写邮箱和验证码"), "error");
     const r = await api("/api/auth/change-contact", { method: "PUT", body: {target_type:"email", target:email, code:code} });
     if (r.message) toast(r.message, "ok");
   };
@@ -1720,12 +2061,20 @@ function renderComposeWithTo(toEmail) {
           <div class="field wide">
             <label>${t("compose.body", "正文")}</label>
             <div class="format-toolbar" style="margin-bottom:8px;display:flex;gap:4px">
-              <button type="button" class="btn" data-format="bold" title="加粗"><b>B</b></button>
-              <button type="button" class="btn" data-format="italic" title="斜体"><i>I</i></button>
-              <button type="button" class="btn" data-format="list" title="无序列表">•</button>
-              <button type="button" class="btn" data-format="link" title="插入链接">🔗</button>
+              <button type="button" class="btn" data-format="bold" title="${t("compose.toolbarBold","加粗")}"><b>B</b></button>
+              <button type="button" class="btn" data-format="italic" title="${t("compose.toolbarItalic","斜体")}"><i>I</i></button>
+              <button type="button" class="btn" data-format="list" title="${t("compose.toolbarList","无序列表")}">•</button>
+              <button type="button" class="btn" data-format="link" title="${t("compose.toolbarLink","插入链接")}">🔗</button>
             </div>
             <textarea name="body" id="compose-body">${esc(draft.body || "")}</textarea>
+          </div>
+          <div class="field wide">
+            <label>${t("compose.attachments", "附件")}</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="file" id="compose-attachment-input" multiple style="flex:1" />
+              <button type="button" class="btn" id="compose-upload-attachment">${t("compose.uploadBtn","上传")}</button>
+            </div>
+            <div id="compose-attachments-list" style="margin-top:8px;font-size:12px"></div>
           </div>
         </div>
         <div class="btn-row" style="justify-content:flex-start">
@@ -1754,6 +2103,44 @@ function renderComposeWithTo(toEmail) {
       ta.setRangeText(before + selected + after, start, end, "select");
       ta.focus();
     });
+  });
+
+  // ── 附件上传 ──
+  const composeAttachments = [];
+  function renderAttachmentList() {
+    const listEl = document.querySelector("#compose-attachments-list");
+    if (!listEl) return;
+    listEl.innerHTML = composeAttachments.map((a, i) =>
+      `<span style="display:inline-block;margin-right:8px;padding:2px 8px;background:var(--surface);border-radius:4px">${esc(a.filename)} (${(a.size / 1024).toFixed(1)} KB) <a href="javascript:void(0)" data-remove-att="${i}" style="color:var(--red);margin-left:4px">✕</a></span>`
+    ).join("");
+    document.querySelectorAll("[data-remove-att]").forEach((link) => {
+      link.addEventListener("click", () => {
+        composeAttachments.splice(parseInt(link.dataset.removeAtt), 1);
+        renderAttachmentList();
+      });
+    });
+  }
+
+  document.querySelector("#compose-upload-attachment").addEventListener("click", async () => {
+    const fileInput = document.querySelector("#compose-attachment-input");
+    const files = fileInput.files;
+    if (!files || files.length === 0) { toast(t("compose.selectFile","请选择文件"), "error"); return; }
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const result = await api("/api/mail/attachments", {
+          method: "POST",
+          body: formData,
+          headers: {},
+        });
+        composeAttachments.push({ id: result.id, filename: result.filename, size: result.size });
+      } catch (err) {
+        toast(t("compose.uploadFailPrefix","上传失败: ") + err.message, "error");
+      }
+    }
+    renderAttachmentList();
+    fileInput.value = "";
   });
 
   // ── 保存草稿 ──
@@ -1793,6 +2180,7 @@ function renderComposeWithTo(toEmail) {
         body: form.get("body"),
         format: form.get("format"),
         encryption_mode: form.get("encryption_mode"),
+        attachment_ids: composeAttachments.map((a) => a.id),
       };
       const result = await api("/api/mail/send", { method: "POST", body: payload });
       toast(result.message);
@@ -1855,7 +2243,7 @@ function showContactModal(existing) {
 
     const payload = {
       kind: "contact",
-      title: title || "未命名联系人",
+      title: title || t("contacts.unnamed","未命名联系人"),
       meta_json: {
         first_name: firstName,
         last_name: lastName,
@@ -1883,7 +2271,7 @@ function showContactModal(existing) {
 
   if (isEdit) {
     overlay.querySelector("#contact-delete").addEventListener("click", async () => {
-      if (!confirm("确定要删除该联系人吗？")) return;
+      if (!confirm(t("contacts.deleteConfirm","确定要删除该联系人吗？"))) return;
       try {
         await api(`/api/items/${contactId}`, { method: "DELETE" });
         overlay.remove();
@@ -1984,7 +2372,7 @@ function renderTaskKanban(container) {
         <h3 class="kanban-col-title">${col.label} <span class="count">${items.length}</span></h3>
         <div class="kanban-col-body">${items
           .map((t) => taskCardHtml(t))
-          .join("") || '<div class="kanban-empty">拖拽任务至此</div>'}</div>
+          .join("") || '<div class="kanban-empty">' + t("tasks.kanbanEmpty","拖拽任务至此") + '</div>'}</div>
       </div>`;
     })
     .join("")}</div>`;
@@ -2198,7 +2586,7 @@ function showTaskModal(existing) {
 
   if (isEdit) {
     overlay.querySelector("#task-delete").addEventListener("click", async () => {
-      if (!confirm("确定要删除该任务吗？")) return;
+      if (!confirm(t("tasks.confirmDelete","确定要删除该任务吗？"))) return;
       try {
         await api(`/api/items/${taskId}`, { method: "DELETE" });
         overlay.remove();
@@ -2222,7 +2610,7 @@ async function renderNotes() {
         <button class="btn primary" id="note-new">+ ${t("notes.new", "新建便签")}</button>
         <select id="note-filter-cat">
           <option value="">全部</option>
-          ${["个人", "工作", "学习", "灵感", "其他"].map((cat) => `<option value="${cat}" ${notesState.filterCategory === cat ? "selected" : ""}>${cat}</option>`).join("")}
+          ${[t("notes.personal","个人"), t("notes.work","工作"), t("notes.study","学习"), t("notes.idea","灵感"), t("notes.other","其他")].map((cat) => `<option value="${cat}" ${notesState.filterCategory === cat ? "selected" : ""}>${cat}</option>`).join("")}
         </select>
       </div>
       <div id="note-grid"><div class="empty-state">${t("notes.loading", "加载便签...")}</div></div>
@@ -2275,7 +2663,7 @@ async function loadNotes() {
 
       return `<article class="note-card" data-note-id="${n.id}" style="border-top:4px solid ${esc(color)}">
         <div class="note-card-head">
-          <h4>${esc(n.title || "无标题")}${pinned ? ' <span class="pinned-mark">&#128204;</span>' : ""}</h4>
+          <h4>${esc(n.title || t("notes.untitled","无标题"))}${pinned ? ' <span class="pinned-mark">&#128204;</span>' : ""}</h4>
         </div>
         <p class="note-summary">${esc(summary)}</p>
         ${tags.length ? `<div class="note-tags">${tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}</div>` : ""}
@@ -2302,10 +2690,10 @@ function showNoteModal(existing) {
   const noteId = isEdit ? existing.id : null;
 
   const colors = ["#F9E79F", "#AED6F1", "#D7BDE2", "#A3E4D7", "#FADBD8"];
-  const colorNames = ["黄", "蓝", "紫", "绿", "粉"];
+  const colorNames = [t("notes.colorYellow","黄"), t("notes.colorBlue","蓝"), t("notes.colorPurple","紫"), t("notes.colorGreen","绿"), t("notes.colorPink","粉")];
   const currColor = meta.color || "#F9E79F";
 
-  const categories = ["个人", "工作", "学习", "灵感", "其他"];
+  const categories = [t("notes.personal","个人"), t("notes.work","工作"), t("notes.study","学习"), t("notes.idea","灵感"), t("notes.other","其他")];
 
   const overlay = document.createElement("div");
   overlay.id = "note-modal-overlay";
@@ -2424,7 +2812,7 @@ function showNoteModal(existing) {
 
     const payload = {
       kind: "note",
-      title: overlay.querySelector("#note-title").value.trim() || "无标题",
+      title: overlay.querySelector("#note-title").value.trim() || t("notes.untitled","无标题"),
       meta_json: newMeta,
     };
     try {
@@ -2442,7 +2830,7 @@ function showNoteModal(existing) {
 
   if (isEdit) {
     overlay.querySelector("#note-delete").addEventListener("click", async () => {
-      if (!confirm("确定要删除该便签吗？")) return;
+      if (!confirm(t("notes.deleteConfirm","确定要删除该便签吗？"))) return;
       try {
         await api(`/api/items/${noteId}`, { method: "DELETE" });
         overlay.remove();

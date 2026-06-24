@@ -1,0 +1,21 @@
+{
+  "meta": {
+    "id": "replace-with-theme-id",
+    "name": "Theme Name",
+    "author": "Your Name",
+    "license": "CC0-1.0",
+    "description": "Describe the intended visual style."
+  },
+  "tokens": {
+    "bg": "#eef3f9",
+    "surface": "#ffffff",
+    "surfaceSoft": "#f7faff",
+    "line": "#dce5f1",
+    "text": "#182235",
+    "muted": "#64748b",
+    "primary": "#1d73e8",
+    "green": "#0f9f6e",
+    "red": "#d93025",
+    "yellow": "#f4b400"
+  }
+}

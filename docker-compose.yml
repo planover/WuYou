@@ -1,0 +1,30 @@
+services:
+  wuyou:
+    image: ghcr.io/planover/wuyou:latest
+    container_name: wuyou
+    ports:
+      - "8000:8000"
+    environment:
+      WUYOU_ENVIRONMENT: production
+      WUYOU_DATA_DIR: /data
+      WUYOU_ALLOW_ORIGINS: "*"
+      WUYOU_DEFAULT_REMOTE_SYNC_ENDPOINT: "http://localhost:8787/wuyou-sync"
+    volumes:
+      - ./wuyou-data:/data
+    restart: unless-stopped
+
+  # ── Optional: standalone sync worker ───────────────────────────────────
+  # Uncomment the block below to run sync tasks in a dedicated worker
+  # process (set WUYOU_SYNC_MODE=worker on the main service as well).
+  #
+  # worker:
+  #   image: ghcr.io/planover/wuyou:latest
+  #   container_name: wuyou-worker
+  #   command: python app/worker.py
+  #   environment:
+  #     WUYOU_ENVIRONMENT: production
+  #     WUYOU_DATA_DIR: /data
+  #     WUYOU_SYNC_MODE: worker
+  #   volumes:
+  #     - ./wuyou-data:/data
+  #   restart: unless-stopped

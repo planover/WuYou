@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "id": "replace-with-locale-id",
+    "name": "Language Name",
+    "author": "Your Name",
+    "license": "CC0-1.0"
+  },
+  "messages": {
+    "nav.inbox": "Inbox",
+    "nav.unread": "Unread",
+    "nav.compose": "Compose",
+    "nav.accounts": "Accounts",
+    "nav.plugins": "Plugins",
+    "nav.settings": "Settings",
+    "nav.about": "About"
+  }
+}
