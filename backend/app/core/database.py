@@ -82,6 +82,14 @@ class Database:
                 connection.execute(
                     "ALTER TABLE messages ADD COLUMN imap_folder TEXT NOT NULL DEFAULT 'INBOX'"
                 )
+            if "thread_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE messages ADD COLUMN thread_id TEXT NOT NULL DEFAULT ''"
+                )
+            if "in_reply_to" not in columns:
+                connection.execute(
+                    "ALTER TABLE messages ADD COLUMN in_reply_to TEXT NOT NULL DEFAULT ''"
+                )
 
             folder_columns = {
                 row["name"]
@@ -316,6 +324,8 @@ CREATE TABLE IF NOT EXISTS messages (
     starred INTEGER NOT NULL DEFAULT 0,
     has_attachments INTEGER NOT NULL DEFAULT 0,
     remote_content_allowed INTEGER NOT NULL DEFAULT 0,
+    thread_id TEXT NOT NULL DEFAULT '',
+    in_reply_to TEXT NOT NULL DEFAULT '',
     received_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -499,6 +509,48 @@ CREATE TABLE IF NOT EXISTS auto_reply_log (
 
 CREATE INDEX IF NOT EXISTS idx_auto_reply_log_user_mailbox_reply
     ON auto_reply_log(user_id, mailbox_id, reply_to);
+
+CREATE TABLE IF NOT EXISTS mail_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    condition_field TEXT NOT NULL,
+    condition_op TEXT NOT NULL DEFAULT 'contains',
+    condition_value TEXT NOT NULL,
+    action_type TEXT NOT NULL,
+    action_value TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS message_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    subject TEXT NOT NULL DEFAULT '',
+    body_text TEXT NOT NULL DEFAULT '',
+    body_html TEXT NOT NULL DEFAULT '',
+    format TEXT NOT NULL DEFAULT 'text',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS contact_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(user_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS contact_group_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL REFERENCES contact_groups(id) ON DELETE CASCADE,
+    contact_id INTEGER NOT NULL REFERENCES content_items(id) ON DELETE CASCADE,
+    UNIQUE(group_id, contact_id)
+);
 """
 
 
@@ -519,6 +571,9 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_messages_user_mailbox_external
             ON messages(user_id, mailbox_id, external_id);
+
+        CREATE INDEX IF NOT EXISTS idx_messages_user_thread
+            ON messages(user_id, thread_id);
 
         CREATE INDEX IF NOT EXISTS idx_mailbox_folders_user_mailbox
             ON mailbox_folders(user_id, mailbox_id);

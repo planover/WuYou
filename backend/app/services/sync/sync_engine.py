@@ -333,6 +333,7 @@ def sync_mailbox(
             message["folder_role"] = role
             message["imap_folder"] = imap_name
             message["folder"] = imap_name
+            thread_id, in_reply_to = _compute_thread_id(db, message)
             message_rows.append(
                 (
                     int(mailbox["user_id"]),
@@ -356,6 +357,8 @@ def sync_mailbox(
                     message["received_at"],
                     now,
                     now,
+                    thread_id,
+                    in_reply_to,
                 )
             )
 
@@ -370,8 +373,8 @@ def sync_mailbox(
                         user_id, mailbox_id, external_id, folder, folder_role, imap_folder,
                         subject, sender, recipients, snippet, body_text, body_html, raw_headers,
                         attachments_json, unread, starred, has_attachments, remote_content_allowed,
-                        received_at, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        received_at, created_at, updated_at, thread_id, in_reply_to
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     message_rows,
                 )
@@ -380,6 +383,9 @@ def sync_mailbox(
             except Exception:
                 conn.rollback()
                 raise
+
+            for message in messages:
+                _apply_rules_to_message(db, int(mailbox["user_id"]), message)
 
         per_folder["inserted"] = inserted
         stats["inserted"] += inserted
@@ -404,6 +410,105 @@ def sync_mailbox(
         )
 
     return stats
+
+
+def _compute_thread_id(db: Database, msg: dict[str, Any]) -> tuple[str, str]:
+    raw_headers = msg.get("raw_headers", "{}")
+    try:
+        headers = json.loads(raw_headers) if isinstance(raw_headers, str) else raw_headers
+    except (json.JSONDecodeError, TypeError):
+        headers = {}
+
+    message_id = headers.get("Message-ID", headers.get("message-id", ""))
+    in_reply_to = headers.get("In-Reply-To", headers.get("in-reply-to", ""))
+    references = headers.get("References", headers.get("references", ""))
+
+    if in_reply_to:
+        existing = db.query_one(
+            "SELECT thread_id FROM messages WHERE external_id = ?",
+            (in_reply_to,),
+        )
+        if existing and existing.get("thread_id"):
+            return existing["thread_id"], in_reply_to
+
+    if references:
+        first_ref = references.strip().split()[0]
+        if first_ref:
+            existing = db.query_one(
+                "SELECT thread_id FROM messages WHERE external_id = ?",
+                (first_ref,),
+            )
+            if existing and existing.get("thread_id"):
+                return existing["thread_id"], in_reply_to
+
+    if message_id:
+        return message_id, in_reply_to
+
+    subject = msg.get("subject", "") or ""
+    normalized = re.sub(
+        r'^(?:(?:Re|Fwd|Fw|AW|WG)\s*:\s*)+', '', subject,
+        flags=re.IGNORECASE,
+    ).strip().lower()
+    return normalized, in_reply_to
+
+
+def _apply_rules_to_message(db: Database, user_id: int, msg: dict[str, Any]) -> None:
+    rules = db.query_all(
+        "SELECT * FROM mail_rules WHERE user_id = ? AND enabled = 1 ORDER BY priority DESC",
+        (user_id,),
+    )
+    for rule in rules:
+        field_val = ""
+        if rule["condition_field"] == "from":
+            field_val = msg.get("sender", "")
+        elif rule["condition_field"] == "subject":
+            field_val = msg.get("subject", "")
+        elif rule["condition_field"] == "body":
+            field_val = (msg.get("body_text") or "") + (msg.get("snippet") or "")
+        else:
+            continue
+
+        matched = False
+        op = rule["condition_op"]
+        val = rule["condition_value"].lower()
+        if op == "contains":
+            matched = val in field_val.lower()
+        elif op == "equals":
+            matched = field_val.lower() == val
+        elif op == "starts_with":
+            matched = field_val.lower().startswith(val)
+        if not matched:
+            continue
+
+        row = db.query_one(
+            "SELECT id FROM messages WHERE external_id = ? AND mailbox_id = ?",
+            (msg["external_id"], int(msg.get("mailbox_id", 0))),
+        )
+        if not row:
+            continue
+        msg_id = row["id"]
+
+        action = rule["action_type"]
+        aval = rule["action_value"]
+        if action == "mark_read":
+            db.execute("UPDATE messages SET unread = 0 WHERE id = ?", (msg_id,))
+        elif action == "star":
+            db.execute("UPDATE messages SET starred = 1 WHERE id = ?", (msg_id,))
+        elif action == "move_folder":
+            db.execute(
+                "UPDATE messages SET folder_role = ?, folder = ? WHERE id = ?",
+                (aval, aval, msg_id),
+            )
+        elif action == "add_tag":
+            tag_exists = db.query_one(
+                "SELECT id FROM tags WHERE user_id = ? AND name = ?",
+                (user_id, aval),
+            )
+            if tag_exists:
+                db.execute(
+                    "INSERT OR IGNORE INTO message_tags(message_id, tag_id) VALUES (?, ?)",
+                    (msg_id, tag_exists["id"]),
+                )
 
 
 def run_mailbox_sync(

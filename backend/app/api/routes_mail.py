@@ -63,6 +63,8 @@ def _message_out(row, tag_map: dict[int, list[dict]] | None = None) -> MessageOu
         starred=bool(row["starred"]),
         has_attachments=bool(row["has_attachments"]),
         remote_content_allowed=bool(row["remote_content_allowed"]),
+        thread_id=row["thread_id"] if "thread_id" in row.keys() else "",
+        in_reply_to=row["in_reply_to"] if "in_reply_to" in row.keys() else "",
         received_at=row["received_at"],
         tags=tags if isinstance(tags, list) else [dict(item) for item in tags],
     )

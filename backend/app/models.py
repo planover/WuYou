@@ -227,3 +227,50 @@ class WebDavBackupRequest(BaseModel):
     username: str | None = None
     password: str | None = None
 
+
+class MailRuleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    enabled: bool = True
+    condition_field: str = Field(min_length=1)
+    condition_op: str = "contains"
+    condition_value: str = Field(min_length=1)
+    action_type: str = Field(min_length=1)
+    action_value: str = ""
+    priority: int = 0
+
+
+class MailRuleOut(MailRuleCreate):
+    id: int
+
+
+class TemplateCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    subject: str = ""
+    body_text: str = ""
+    body_html: str = ""
+    format: Literal["text", "markdown", "html"] = "text"
+
+
+class TemplateOut(TemplateCreate):
+    id: int
+
+
+class ContactGroupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    contact_ids: list[int] = []
+
+
+class ContactGroupOut(BaseModel):
+    id: int
+    name: str
+    contact_ids: list[int] = []
+    created_at: str
+
+
+class ThreadOut(BaseModel):
+    thread_id: str
+    subject: str
+    messages: list[MessageOut]
+    latest_at: str
+    count: int
+

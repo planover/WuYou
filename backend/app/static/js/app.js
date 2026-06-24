@@ -14,6 +14,7 @@ const state = {
   selectedMessage: null,
   unread: 0,
   folderRole: "all",
+  threadedView: false,
 };
 
 const calendarState = {
@@ -35,6 +36,9 @@ const views = [
   ["contacts", "nav.contacts", "通讯录", "Contacts"],
   ["tasks", "nav.tasks", "任务", "Tasks"],
   ["notes", "nav.notes", "便签", "Notes"],
+  ["templates", "nav.templates", "邮件模板", "Templates"],
+  ["rules", "nav.rules", "邮件规则", "Rules"],
+  ["scheduled", "nav.scheduled", "定时邮件", "Scheduled"],
   ["plugins", "nav.plugins", "插件社区", "Plugins"],
   ["settings", "nav.settings", "设置", "Settings"],
   ["about", "nav.about", "关于", "About"],
@@ -594,6 +598,8 @@ async function route(view) {
   if (view === "contacts") { renderContacts(); return; }
   if (view === "tasks") { renderTasks(); return; }
   if (view === "notes") { renderNotes(); return; }
+  if (view === "templates") return renderTemplates();
+  if (view === "rules") return renderRules();
   if (view === "plugins") return renderPlugins();
   if (view === "settings") return renderSettings();
   if (view === "scheduled") return renderScheduled();
@@ -623,6 +629,7 @@ async function renderInbox(status = "all", query = "", folderRole = null) {
           <button class="btn" id="filter-apply" style="padding:2px 8px">${t("mail.filterApply", "筛选")}</button>
           <button class="btn" id="filter-clear" style="padding:2px 8px">${t("mail.filterClear", "清除")}</button>
         </div>
+        <button class="btn" id="toggle-thread-view" style="padding:2px 8px">${t("mail.threadView", "线索视图")}</button>
         <div class="folder-tabs">
           ${["all","inbox","sent","trash","archive","junk"].map((r) => {
             const labels = { all: t("mail.folderAll", "全部"), inbox: t("mail.folderInbox", "收件箱"), sent: t("mail.folderSent", "已发送"), trash: t("mail.folderTrash", "垃圾箱"), archive: t("mail.folderArchive", "归档"), junk: t("mail.folderJunk", "垃圾邮件") };
@@ -656,11 +663,21 @@ async function renderInbox(status = "all", query = "", folderRole = null) {
     inboxFilters.hasAttachments = false;
     renderInbox(status, query, role);
   });
+  document.querySelector("#toggle-thread-view").addEventListener("click", () => {
+    state.threadedView = !state.threadedView;
+    renderInbox(status, query, role);
+  });
   try {
-    const params = new URLSearchParams({ status, q: query, folder_role: role });
-    const allMessages = await api(`/api/mail/inbox?${params.toString()}`);
-    state.messages = applyInboxFilters(allMessages);
-    renderMessageList();
+    if (state.threadedView) {
+      const params = new URLSearchParams({ folder_role: role });
+      const threads = await api(`/api/mail/threads?${params.toString()}`);
+      renderThreadList(threads);
+    } else {
+      const params = new URLSearchParams({ status, q: query, folder_role: role });
+      const allMessages = await api(`/api/mail/inbox?${params.toString()}`);
+      state.messages = applyInboxFilters(allMessages);
+      renderMessageList();
+    }
   } catch (error) {
     toast(error.message, "error");
   }
@@ -708,6 +725,66 @@ function renderMessageList() {
     )
     .join("");
   document.querySelectorAll("[data-message]").forEach((row) => row.addEventListener("click", () => openMessage(Number(row.dataset.message))));
+}
+
+function renderThreadList(threads) {
+  const list = document.querySelector("#mail-list");
+  if (!threads || !threads.length) {
+    list.innerHTML = `<div class="empty-state">${t("mail.empty", "暂无邮件")}</div>`;
+    return;
+  }
+  list.innerHTML = threads
+    .map((thread) => {
+      const tid = thread.thread_id || thread.id;
+      const subject = thread.subject || "";
+      const count = thread.count || (thread.messages ? thread.messages.length : 0);
+      const snippet = thread.snippet || (thread.latest_snippet || "");
+      const isUnread = thread.is_unread || (thread.messages || []).some((m) => m.unread);
+      const messages = thread.messages || [];
+      return `
+        <article class="item-card thread-card" data-thread-id="${tid}">
+          <div class="thread-header" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+            <div><span class="thread-toggle">▶</span> ${isUnread ? "<strong>" + esc(subject) + "</strong>" : esc(subject)} <span class="muted">(${count} ${t("mail.threadCount", "封")})</span></div>
+            <span class="muted" style="font-size:12px">${esc(snippet)}</span>
+          </div>
+          <div class="thread-messages" style="display:none;margin-top:8px;padding-left:16px;border-left:2px solid var(--border)">
+            ${messages.map((m) => `
+              <div class="thread-msg-row ${m.unread ? "unread" : ""}" data-message="${m.id}" style="cursor:pointer;padding:4px 8px;margin:2px 0;border-radius:4px">
+                <div style="display:flex;justify-content:space-between">
+                  <span><span class="star-icon" data-star-msg="${m.id}" style="cursor:pointer;margin-right:4px" onclick="event.stopPropagation(); toggleStar(${m.id}, this)">${m.starred ? "⭐" : "☆"}</span>${esc(m.sender || t("mail.unknown", "未知发件人"))}</span>
+                  <time style="font-size:11px;color:var(--muted)">${esc(String(m.received_at || "").slice(0, 16))}</time>
+                </div>
+                <div style="font-size:13px">${esc(m.subject)}</div>
+                <div style="font-size:11px;color:var(--muted)">${esc(m.snippet || "")}</div>
+              </div>
+            `).join("")}
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+
+  list.querySelectorAll(".thread-header").forEach((header) => {
+    header.addEventListener("click", () => {
+      const card = header.closest(".thread-card");
+      const toggle = card.querySelector(".thread-toggle");
+      const messagesDiv = card.querySelector(".thread-messages");
+      if (messagesDiv.style.display === "none") {
+        messagesDiv.style.display = "block";
+        toggle.textContent = "▼";
+      } else {
+        messagesDiv.style.display = "none";
+        toggle.textContent = "▶";
+      }
+    });
+  });
+
+  list.querySelectorAll(".thread-msg-row").forEach((row) => {
+    row.addEventListener("click", (e) => {
+      if (e.target.closest(".star-icon")) return;
+      openMessage(Number(row.dataset.message));
+    });
+  });
 }
 
 async function toggleStar(messageId, starEl) {
@@ -1266,6 +1343,7 @@ function renderCompose() {
         <div class="form-grid">
           <div class="field wide"><label>${t("compose.from", "发件邮箱")}</label><select name="mailbox_id" required>${state.accounts.map((account) => `<option value="${account.id}" ${draft.mailbox_id == account.id ? "selected" : ""}>${esc(account.display_name)} · ${esc(account.email_address)}</option>`).join("")}</select></div>
           <div class="field wide"><label>${t("compose.to", "收件人，多个地址用英文逗号分隔")}</label><input name="recipients" required value="${esc(draft.recipients || "")}" /></div>
+          <div id="group-chips" style="margin:4px 0;font-size:12px"></div>
           <div class="field wide"><label>${t("compose.subject", "主题")}</label><input name="subject" required value="${esc(draft.subject || "")}" /></div>
           <div class="field"><label>${t("compose.format", "格式")}</label><select name="format"><option value="text" ${draft.format === "text" ? "selected" : ""}>Text</option><option value="markdown" ${!draft.format || draft.format === "markdown" ? "selected" : ""}>Markdown</option><option value="html" ${draft.format === "html" ? "selected" : ""}>HTML</option></select></div>
           <div class="field"><label>${t("compose.encryption", "加密策略")}</label><select name="encryption_mode"><option value="auto">Auto TLS</option><option value="tls_only">TLS Only</option><option value="pgp">PGP</option></select></div>
@@ -1297,6 +1375,8 @@ function renderCompose() {
       </form>
     </section>
   `;
+
+  renderGroupChips();
 
   // ── 格式工具栏：在光标位置插入 Markdown 标记 ──
   const bodyTextarea = document.querySelector("#compose-body");
@@ -1984,6 +2064,187 @@ async function renderSettings() {
   };
 }
 
+async function renderRules() {
+  const workspace = document.querySelector("#workspace");
+  workspace.innerHTML = `
+    <section class="page-pane">
+      <div class="page-header"><h2>${t("rules.title", "邮件规则")}</h2></div>
+      <div id="rules-list"><div class="empty-state">${t("common.loading", "加载中...")}</div></div>
+      <form class="panel item-card" id="rule-form" style="margin-top:14px">
+        <h3>${t("rules.add", "添加规则")}</h3>
+        <div class="form-grid">
+          <div class="field"><label>${t("rules.name", "规则名称")}</label><input name="name" required /></div>
+          <div class="field"><label>${t("rules.conditionField", "匹配字段")}</label>
+            <select name="condition_field">
+              <option value="from">${t("rules.fieldFrom", "发件人")}</option>
+              <option value="subject">${t("rules.fieldSubject", "主题")}</option>
+              <option value="body">${t("rules.fieldBody", "正文")}</option>
+            </select></div>
+          <div class="field"><label>${t("rules.conditionOp", "匹配方式")}</label>
+            <select name="condition_op">
+              <option value="contains">${t("rules.opContains", "包含")}</option>
+              <option value="equals">${t("rules.opEquals", "等于")}</option>
+              <option value="starts_with">${t("rules.opStartsWith", "开头")}</option>
+            </select></div>
+          <div class="field"><label>${t("rules.conditionValue", "匹配值")}</label><input name="condition_value" required /></div>
+          <div class="field"><label>${t("rules.actionType", "执行动作")}</label>
+            <select name="action_type">
+              <option value="mark_read">${t("rules.actMarkRead", "标记已读")}</option>
+              <option value="star">${t("rules.actStar", "星标")}</option>
+              <option value="move_folder">${t("rules.actMove", "移动到文件夹")}</option>
+              <option value="add_tag">${t("rules.actTag", "添加标签")}</option>
+            </select></div>
+          <div class="field"><label>${t("rules.actionValue", "动作参数")}</label><input name="action_value" placeholder="${t("rules.actionValueHint", "文件夹名或标签名")}" /></div>
+          <div class="field"><label>${t("rules.priority", "优先级")}</label><input name="priority" type="number" value="0" min="0" max="99" /></div>
+        </div>
+        <button class="btn primary" type="submit">${t("rules.save", "保存规则")}</button>
+      </form>
+    </section>
+  `;
+
+  async function loadRules() {
+    const list = document.querySelector("#rules-list");
+    try {
+      const rules = await api("/api/mail/rules");
+      if (!rules.length) {
+        list.innerHTML = `<div class="empty-state">${t("rules.empty", "暂无规则。")}</div>`;
+        return;
+      }
+      const fieldLabels = { from: t("rules.fieldFrom", "发件人"), subject: t("rules.fieldSubject", "主题"), body: t("rules.fieldBody", "正文") };
+      const opLabels = { contains: t("rules.opContains", "包含"), equals: t("rules.opEquals", "等于"), starts_with: t("rules.opStartsWith", "开头") };
+      const actLabels = { mark_read: t("rules.actMarkRead", "标记已读"), star: t("rules.actStar", "星标"), move_folder: t("rules.actMove", "移动到"), add_tag: t("rules.actTag", "添加标签") };
+      list.innerHTML = rules.map((r) => `
+        <article class="item-card">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <strong>${esc(r.name)}</strong>
+              <span class="muted"> | ${fieldLabels[r.condition_field] || r.condition_field} ${opLabels[r.condition_op] || r.condition_op} "${esc(r.condition_value)}" → ${actLabels[r.action_type] || r.action_type} ${r.action_value ? '"' + esc(r.action_value) + '"' : ""}</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <span class="muted" style="font-size:11px">${t("rules.priorityLabel", "优先级")}: ${r.priority}</span>
+              <span style="font-size:11px;color:${r.enabled ? "var(--green)" : "var(--muted)"}">${r.enabled ? t("rules.enabled", "启用") : t("rules.disabled", "停用")}</span>
+              <button class="btn" data-del-rule="${r.id}" style="color:var(--red);font-size:11px;padding:2px 6px">✕</button>
+            </div>
+          </div>
+        </article>
+      `).join("");
+      document.querySelectorAll("[data-del-rule]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          if (!confirm(t("rules.deleteConfirm", "确定要删除该规则吗？"))) return;
+          await api("/api/mail/rules/" + btn.dataset.delRule, { method: "DELETE" });
+          loadRules();
+        });
+      });
+    } catch (err) { toast(err.message, "error"); }
+  }
+
+  loadRules();
+
+  document.querySelector("#rule-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    try {
+      await api("/api/mail/rules", {
+        method: "POST",
+        body: {
+          name: form.get("name"), enabled: true,
+          condition_field: form.get("condition_field"), condition_op: form.get("condition_op"),
+          condition_value: form.get("condition_value"), action_type: form.get("action_type"),
+          action_value: form.get("action_value") || "", priority: parseInt(form.get("priority")) || 0,
+        },
+      });
+      e.currentTarget.reset();
+      loadRules();
+      toast(t("rules.saved", "规则已保存。"));
+    } catch (err) { toast(err.message, "error"); }
+  });
+}
+
+async function renderTemplates() {
+  const workspace = document.querySelector("#workspace");
+  workspace.className = "workspace";
+  workspace.innerHTML = `<section class="page-pane"><div class="empty-state">${t("common.loading", "加载中...")}</div></section>`;
+
+  try {
+    const data = await api("/api/mail/templates");
+    const templates = data.templates || [];
+    workspace.innerHTML = `
+      <section class="page-pane">
+        <div class="page-header"><h2>${t("templates.title", "邮件模板")}</h2></div>
+        <div id="templates-list" class="grid">
+          ${templates.map((tmpl) => `
+            <article class="item-card" data-template-id="${tmpl.id}">
+              <h3>${esc(tmpl.name)}</h3>
+              <p class="muted">${t("templates.subject", "主题")}: ${esc(tmpl.subject || "")}</p>
+              <p class="muted">${esc((tmpl.body || "").substring(0, 80))}${(tmpl.body || "").length > 80 ? "..." : ""}</p>
+              <div class="btn-row" style="margin-top:8px">
+                <button class="btn primary" data-use-template="${tmpl.id}">${t("templates.use", "使用")}</button>
+                <button class="btn" data-delete-template="${tmpl.id}">${t("templates.delete", "删除")}</button>
+              </div>
+            </article>
+          `).join("")}
+        </div>
+        <form class="panel item-card" id="template-form" style="margin-top:14px">
+          <h3>${t("templates.create", "新建模板")}</h3>
+          <div class="form-grid">
+            <div class="field wide"><label>${t("templates.name", "名称")}</label><input id="tmpl-name" name="name" required /></div>
+            <div class="field wide"><label>${t("templates.subject", "主题")}</label><input id="tmpl-subject" name="subject" /></div>
+            <div class="field wide"><label>${t("templates.body", "正文")}</label><textarea id="tmpl-body" name="body" rows="6"></textarea></div>
+          </div>
+          <button type="submit" class="btn primary">${t("templates.create", "新建模板")}</button>
+        </form>
+      </section>
+    `;
+
+    document.querySelectorAll("[data-use-template]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = Number(btn.dataset.useTemplate);
+        const tmpl = templates.find((t) => t.id === id);
+        if (tmpl) {
+          localStorage.setItem("wuyou.draft", JSON.stringify({
+            recipients: "",
+            subject: tmpl.subject || "",
+            body: tmpl.body || "",
+            format: "text",
+          }));
+          route("compose");
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-delete-template]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm(t("templates.deleteConfirm", "确定要删除该模板吗？"))) return;
+        const id = Number(btn.dataset.deleteTemplate);
+        try {
+          await api(`/api/mail/templates/${id}`, { method: "DELETE" });
+          renderTemplates();
+        } catch (err) {
+          toast(err.message, "error");
+        }
+      });
+    });
+
+    document.querySelector("#template-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const form = new FormData(e.currentTarget);
+      const payload = {
+        name: form.get("name"),
+        subject: form.get("subject") || "",
+        body: form.get("body") || "",
+      };
+      try {
+        await api("/api/mail/templates", { method: "POST", body: payload });
+        renderTemplates();
+      } catch (err) {
+        toast(err.message, "error");
+      }
+    });
+  } catch (err) {
+    workspace.innerHTML = `<section class="page-pane"><div class="empty-state">${t("common.loading", "加载中...")} - ${esc(err.message)}</div></section>`;
+  }
+}
+
 async function renderAbout() {
   const workspace = document.querySelector("#workspace");
   const about = await api("/api/settings/about");
@@ -2042,6 +2303,15 @@ async function renderContacts() {
         <button class="btn primary" id="contact-new">+ ${t("contacts.new", "新建联系人")}</button>
       </div>
       <div id="contact-list"><div class="empty-state">${t("contacts.loading", "加载通讯录...")}</div></div>
+      <h3>${t("contacts.groups", "联系人群组")}</h3>
+      <div id="contact-groups-list"><div class="empty-state">${t("common.loading", "加载中...")}</div></div>
+      <form id="group-form" style="margin-top:8px">
+        <div class="form-grid">
+          <div class="field wide"><label>${t("contacts.groupName", "群组名称")}</label><input id="group-name" placeholder="${t("contacts.groupName", "群组名称")}" required /></div>
+          <div class="field wide"><label>${t("contacts.groupMembers", "选择成员")}</label><div id="group-members-checkboxes" style="margin:4px 0"></div></div>
+        </div>
+        <button type="submit" class="btn primary">${t("contacts.createGroup", "创建群组")}</button>
+      </form>
     </section>
   `;
 
@@ -2067,6 +2337,7 @@ async function loadContacts() {
   }
   if (!contactsState.contacts.length) {
     list.innerHTML = `<div class="empty-state">${t("contacts.empty", "暂无联系人")}</div>`;
+    await loadContactGroups();
     return;
   }
   list.innerHTML = contactsState.contacts
@@ -2107,6 +2378,118 @@ async function loadContacts() {
       renderComposeWithTo(email);
     });
   });
+
+  await loadContactGroups();
+}
+
+async function loadContactGroups() {
+  try {
+    const contactEmailMap = {};
+    contactsState.contacts.forEach((c) => {
+      const meta = c.meta_json || {};
+      if (meta.email) {
+        contactEmailMap[c.id] = meta.email;
+        contactEmailMap[String(c.id)] = meta.email;
+      }
+    });
+    contactsState.contactEmailMap = contactEmailMap;
+
+    const data = await api("/api/mail/contact-groups");
+    const groups = data.groups || [];
+    const groupsList = document.querySelector("#contact-groups-list");
+    if (groupsList) {
+      if (!groups.length) {
+        groupsList.innerHTML = `<div class="empty-state">${t("contacts.noGroups", "暂无联系人群组")}</div>`;
+      } else {
+        groupsList.innerHTML = groups.map((g) => {
+          const memberCount = (g.contact_ids || []).length;
+          return `<article class="item-card">
+            <h3>${esc(g.name)}</h3>
+            <p class="muted">${memberCount} ${t("contacts.members", "位成员")}</p>
+            <button class="btn" data-delete-group="${g.id}">${t("contacts.deleteGroup", "删除")}</button>
+          </article>`;
+        }).join("");
+        groupsList.querySelectorAll("[data-delete-group]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            if (!confirm(t("contacts.deleteGroupConfirm", "确定要删除该群组吗？"))) return;
+            const id = Number(btn.dataset.deleteGroup);
+            try {
+              await api(`/api/mail/contact-groups/${id}`, { method: "DELETE" });
+              loadContacts();
+            } catch (err) {
+              toast(err.message, "error");
+            }
+          });
+        });
+      }
+    }
+
+    const checkboxesDiv = document.querySelector("#group-members-checkboxes");
+    if (checkboxesDiv) {
+      if (!contactsState.contacts.length) {
+        checkboxesDiv.innerHTML = `<span class="muted">${t("contacts.noContactsForGroup", "暂无可用联系人")}</span>`;
+      } else {
+        checkboxesDiv.innerHTML = contactsState.contacts.map((c) => {
+          const meta = c.meta_json || {};
+          const name = esc(meta.first_name || c.title || "");
+          const email = esc(meta.email || "");
+          return `<label style="display:inline-block;margin-right:12px;font-size:13px"><input type="checkbox" name="contact-ids" value="${c.id}" /> ${name}${email ? " (" + email + ")" : ""}</label>`;
+        }).join("");
+      }
+    }
+
+    const groupForm = document.querySelector("#group-form");
+    if (groupForm) {
+      groupForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const name = document.querySelector("#group-name").value.trim();
+        if (!name) return;
+        const checked = document.querySelectorAll("#group-members-checkboxes input[type=checkbox]:checked");
+        const contactIds = Array.from(checked).map((cb) => Number(cb.value));
+        if (!contactIds.length) {
+          toast(t("contacts.selectMembers", "请选择至少一个成员"), "error");
+          return;
+        }
+        try {
+          await api("/api/mail/contact-groups", { method: "POST", body: { name, contact_ids: contactIds } });
+          loadContacts();
+        } catch (err) {
+          toast(err.message, "error");
+        }
+      });
+    }
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+function renderGroupChips() {
+  const chipsDiv = document.querySelector("#group-chips");
+  if (!chipsDiv) return;
+  api("/api/mail/contact-groups").then((data) => {
+    const groups = data.groups || [];
+    if (!groups.length) {
+      chipsDiv.innerHTML = "";
+      return;
+    }
+    const emailMap = contactsState.contactEmailMap || {};
+    chipsDiv.innerHTML = `<span class="muted" style="margin-right:6px">${t("contacts.groups", "群组")}:</span>` +
+      groups.map((g) => {
+        const emails = (g.contact_ids || []).map((id) => emailMap[id] || "").filter(Boolean).join(", ");
+        return `<span class="tag" data-group-emails="${esc(emails)}" style="cursor:pointer;margin:2px 4px;background:var(--primary);color:#fff;padding:1px 8px;border-radius:12px;font-size:12px">${esc(g.name)}</span>`;
+      }).join("");
+    chipsDiv.querySelectorAll("[data-group-emails]").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const emails = chip.dataset.groupEmails;
+        const input = document.querySelector("#compose-form input[name=recipients]");
+        if (input) {
+          const current = input.value.trim();
+          input.value = current ? current + ", " + emails : emails;
+          input.focus();
+        }
+      });
+    });
+  }).catch(() => {});
 }
 
 function renderComposeWithTo(toEmail) {
@@ -2120,6 +2503,7 @@ function renderComposeWithTo(toEmail) {
         <div class="form-grid">
           <div class="field wide"><label>${t("compose.from", "发件邮箱")}</label><select name="mailbox_id" required>${state.accounts.map((account) => `<option value="${account.id}" ${draft.mailbox_id == account.id ? "selected" : ""}>${esc(account.display_name)} · ${esc(account.email_address)}</option>`).join("")}</select></div>
           <div class="field wide"><label>${t("compose.to", "收件人，多个地址用英文逗号分隔")}</label><input name="recipients" required value="${esc(toEmail || draft.recipients || "")}" /></div>
+          <div id="group-chips" style="margin:4px 0;font-size:12px"></div>
           <div class="field wide"><label>${t("compose.subject", "主题")}</label><input name="subject" required value="${esc(draft.subject || "")}" /></div>
           <div class="field"><label>${t("compose.format", "格式")}</label><select name="format"><option value="text" ${draft.format === "text" ? "selected" : ""}>Text</option><option value="markdown" ${!draft.format || draft.format === "markdown" ? "selected" : ""}>Markdown</option><option value="html" ${draft.format === "html" ? "selected" : ""}>HTML</option></select></div>
           <div class="field"><label>${t("compose.encryption", "加密策略")}</label><select name="encryption_mode"><option value="auto">Auto TLS</option><option value="tls_only">TLS Only</option><option value="pgp">PGP</option></select></div>
@@ -2151,6 +2535,8 @@ function renderComposeWithTo(toEmail) {
       </form>
     </section>
   `;
+
+  renderGroupChips();
 
   // ── 格式工具栏 ──
   const bodyTextarea = document.querySelector("#compose-body");
