@@ -1615,10 +1615,11 @@ async function renderAbout() {
         <p>首个正式版本，28项核心功能全部就绪。</p>
         <ul style="text-align:left"><li>多邮箱统一管理 (12家服务商自动匹配)</li><li>PGP端到端加密</li><li>日历/通讯录/任务/便签</li><li>CalDAV/CardDAV/Google/MS Graph同步</li><li>OAuth2一键登录</li><li>Thunderbird全量数据迁移</li><li>插件社区+主题/语言包</li><li>响应式布局 (PC/平板/手机)</li><li>热更新</li><li>远程设备同步</li></ul>
       </div>
-      <button class="btn" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+      <button class="btn close-modal-btn">关闭</button>
     </div>`;
     document.body.appendChild(modal);
-    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    modal.querySelector(".close-modal-btn").addEventListener("click", (e) => { e.stopPropagation(); modal.remove(); });
+    modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
   };
 }
 
@@ -2075,8 +2076,8 @@ function renderTaskList(container) {
   });
 }
 
-function taskCardHtml(t) {
-  const meta = t.meta_json || {};
+function taskCardHtml(task) {
+  const meta = task.meta_json || {};
   const priority = meta.priority ?? 5;
   let priorityColor = "#38a169";
   let priorityLabel = "";
@@ -2091,14 +2092,14 @@ function taskCardHtml(t) {
   const statusLabel = status === "todo" ? t("tasks.statusTodo", "待办") : status === "in_progress" ? t("tasks.statusInProgress", "进行中") : t("tasks.statusDone", "已完成");
   const nextLabel = status === "todo" ? t("tasks.statusInProgress", "进行中") : t("tasks.statusDone", "已完成");
 
-  const tagsHtml = (meta.tags || [])
+  const tagsHtml = (meta.tags || []).length
     ? meta.tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")
     : "";
 
-  return `<article class="task-card" data-task-id="${t.id}" style="border-left:3px solid ${priorityColor};padding:10px 12px;background:var(--surface, #f7f7f7);border-radius:8px">
+  return `<article class="task-card" data-task-id="${task.id}" style="border-left:3px solid ${priorityColor};padding:10px 12px;background:var(--surface, #f7f7f7);border-radius:8px">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-      <strong style="flex:1;word-break:break-word">${esc(t.title)}</strong>
-      <button class="btn" style="font-size:11px;padding:2px 8px;flex-shrink:0" data-delete-task="${t.id}" title="${t("tasks.delete", "删除")}">&#10005;</button>
+      <strong style="flex:1;word-break:break-word">${esc(task.title)}</strong>
+      <button class="btn" style="font-size:11px;padding:2px 8px;flex-shrink:0" data-delete-task="${task.id}" title="${t("tasks.delete", "删除")}">&#10005;</button>
     </div>
     <div style="margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:6px">
       ${priorityLabel ? `<span style="background:${priorityColor};color:#fff;padding:1px 6px;border-radius:3px;font-size:0.75em">P${priority} ${priorityLabel}</span>` : ""}
@@ -2108,7 +2109,7 @@ function taskCardHtml(t) {
     ${meta.description ? `<p style="margin:6px 0 0;font-size:0.85em;color:var(--muted, #888)">${esc(String(meta.description).slice(0, 80))}</p>` : ""}
     <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
       ${status !== "done"
-        ? `<button class="btn" style="font-size:11px;padding:3px 10px" data-next-status="${t.id}" data-cur-status="${status}">&#8594; ${esc(nextLabel)}</button>`
+        ? `<button class="btn" style="font-size:11px;padding:3px 10px" data-next-status="${task.id}" data-cur-status="${status}">&#8594; ${esc(nextLabel)}</button>`
         : `<span class="tag" style="background:#38a169;color:#fff">&#10003; ${esc(statusLabel)}</span>`}
     </div>
   </article>`;
