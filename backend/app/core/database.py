@@ -118,6 +118,23 @@ class Database:
                     "ALTER TABLE installed_plugins ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"
                 )
 
+            acct_cols = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(mailbox_accounts)").fetchall()
+            }
+            for col, defn in [
+                ("signature_html", "TEXT NOT NULL DEFAULT ''"),
+                ("signature_text", "TEXT NOT NULL DEFAULT ''"),
+                ("auto_reply_enabled", "INTEGER NOT NULL DEFAULT 0"),
+                ("auto_reply_subject", "TEXT NOT NULL DEFAULT ''"),
+                ("auto_reply_body", "TEXT NOT NULL DEFAULT ''"),
+                ("auto_reply_start", "TEXT"),
+                ("auto_reply_end", "TEXT"),
+                ("auto_reply_days", "INTEGER NOT NULL DEFAULT 0"),
+            ]:
+                if col not in acct_cols:
+                    connection.execute(f"ALTER TABLE mailbox_accounts ADD COLUMN {col} {defn}")
+
             # ── 性能索引：确保核心查询走索引而非全表扫描 ──
             _ensure_indexes(connection)
             connection.commit()
@@ -221,6 +238,14 @@ CREATE TABLE IF NOT EXISTS mailbox_accounts (
     username TEXT NOT NULL,
     encrypted_secret TEXT NOT NULL,
     sync_enabled INTEGER NOT NULL DEFAULT 1,
+    signature_html TEXT NOT NULL DEFAULT '',
+    signature_text TEXT NOT NULL DEFAULT '',
+    auto_reply_enabled INTEGER NOT NULL DEFAULT 0,
+    auto_reply_subject TEXT NOT NULL DEFAULT '',
+    auto_reply_body TEXT NOT NULL DEFAULT '',
+    auto_reply_start TEXT,
+    auto_reply_end TEXT,
+    auto_reply_days INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -441,6 +466,39 @@ CREATE TABLE IF NOT EXISTS telemetry_events (
     properties_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS scheduled_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    mailbox_id INTEGER NOT NULL,
+    recipients_json TEXT NOT NULL DEFAULT '[]',
+    cc_json TEXT NOT NULL DEFAULT '[]',
+    bcc_json TEXT NOT NULL DEFAULT '[]',
+    subject TEXT NOT NULL,
+    body_text TEXT NOT NULL DEFAULT '',
+    body_html TEXT NOT NULL DEFAULT '',
+    format TEXT NOT NULL DEFAULT 'text',
+    attachment_ids_json TEXT NOT NULL DEFAULT '[]',
+    scheduled_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    error TEXT,
+    sent_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS auto_reply_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    mailbox_id INTEGER NOT NULL,
+    reply_to TEXT NOT NULL,
+    sent_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_auto_reply_log_user_mailbox_reply
+    ON auto_reply_log(user_id, mailbox_id, reply_to);
 """
 
 

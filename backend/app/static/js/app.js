@@ -596,6 +596,7 @@ async function route(view) {
   if (view === "notes") { renderNotes(); return; }
   if (view === "plugins") return renderPlugins();
   if (view === "settings") return renderSettings();
+  if (view === "scheduled") return renderScheduled();
   return renderAbout();
 }
 
@@ -696,7 +697,7 @@ function renderMessageList() {
       (message) => `
         <article class="mail-row ${message.unread ? "unread" : ""}" data-message="${message.id}">
           <div>
-            <div class="mail-sender">${esc(message.sender || t("mail.unknown", "未知发件人"))}</div>
+            <div class="mail-sender"><span class="star-icon" data-star-msg="${message.id}" style="cursor:pointer;margin-right:4px" onclick="event.stopPropagation(); toggleStar(${message.id}, this)">${message.starred ? "⭐" : "☆"}</span>${esc(message.sender || t("mail.unknown", "未知发件人"))}</div>
             <div class="mail-subject">${esc(message.subject)}</div>
             <div class="mail-snippet">${esc(message.snippet)}</div>
             <div class="tag-line">${message.tags.map((tag) => `<span class="tag" style="background:${esc(tag.color)}">${esc(tag.name)}</span>`).join("")}</div>
@@ -707,6 +708,21 @@ function renderMessageList() {
     )
     .join("");
   document.querySelectorAll("[data-message]").forEach((row) => row.addEventListener("click", () => openMessage(Number(row.dataset.message))));
+}
+
+async function toggleStar(messageId, starEl) {
+  try {
+    const result = await api(`/api/mail/messages/${messageId}/star`, { method: "POST" });
+    state.messages = state.messages.map((m) => m.id === messageId ? { ...m, starred: result.starred } : m);
+    if (starEl) starEl.textContent = result.starred ? "⭐" : "☆";
+    if (state.selectedMessage && state.selectedMessage.id === messageId) {
+      state.selectedMessage.starred = result.starred;
+      const readerStar = document.querySelector("#reader-star");
+      if (readerStar) readerStar.textContent = result.starred ? "⭐" : "☆";
+    }
+  } catch (error) {
+    toast(error.message, "error");
+  }
 }
 
 async function openMessage(id) {
@@ -723,9 +739,12 @@ function renderReader(message) {
   const reader = document.querySelector("#reader");
   reader.innerHTML = `
     <div class="reader-head">
-      <h2>${esc(message.subject)}</h2>
+      <h2><span id="reader-star" style="cursor:pointer" onclick="toggleStar(${message.id})">${message.starred ? "⭐" : "☆"}</span> ${esc(message.subject)}</h2>
       <div class="muted">${esc(message.sender)} · ${esc(message.received_at)}</div>
       <div class="toolbar">
+        <button class="btn" id="reply-mail">↩️ ${t("mail.reply", "回复")}</button>
+        <button class="btn" id="reply-all-mail">↩️↩️ ${t("mail.replyAll", "回复全部")}</button>
+        <button class="btn" id="forward-mail">↪️ ${t("mail.forward", "转发")}</button>
         <button class="btn" id="translate-mail">${t("mail.translate", "翻译")}</button>
         ${
           message.body_html && !message.remote_content_allowed
@@ -766,6 +785,25 @@ function renderReader(message) {
       toast(error.message, "error");
     }
   });
+
+  const doReply = async (mode) => {
+    try {
+      const template = await api(`/api/mail/messages/${message.id}/reply?mode=${mode}`);
+      localStorage.setItem("wuyou.draft", JSON.stringify({
+        mailbox_id: message.mailbox_id || "",
+        recipients: template.to.join(", "),
+        subject: template.subject,
+        body: template.body,
+        in_reply_to: template.in_reply_to,
+      }));
+      route("compose");
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  };
+  document.querySelector("#reply-mail").addEventListener("click", () => doReply("reply"));
+  document.querySelector("#reply-all-mail").addEventListener("click", () => doReply("reply_all"));
+  document.querySelector("#forward-mail").addEventListener("click", () => doReply("forward"));
 }
 
 function pollJobStatus(jobId, onUpdate) {
@@ -1253,6 +1291,7 @@ function renderCompose() {
         <div class="btn-row" style="justify-content:flex-start">
           <button class="btn primary" type="submit" id="compose-send">${t("compose.send", "发送")}</button>
           <button class="btn" type="button" id="compose-draft">${t("compose.saveDraft", "保存草稿")}</button>
+          <button class="btn" type="button" id="compose-schedule">⏱️ 定时发送</button>
           <button class="btn" type="button" id="compose-cancel">${t("compose.cancel", "取消")}</button>
         </div>
       </form>
@@ -1354,6 +1393,7 @@ function renderCompose() {
         format: form.get("format"),
         encryption_mode: form.get("encryption_mode"),
         attachment_ids: composeAttachments.map((a) => a.id),
+        in_reply_to: draft.in_reply_to || null,
       };
       const result = await api("/api/mail/send", { method: "POST", body: payload });
       toast(result.message);
@@ -1389,6 +1429,9 @@ async function renderAccounts() {
             <button class="btn primary" id="oauth-connect-btn" type="button">${t("auth.oauthConnect", "连接")}</button>
           </div>
           <div class="field"><label>${t("accounts.secret", "密码 / 授权码 / 密钥")}</label><input name="secret" type="password" required /></div>
+          <div class="field"><label>签名 (HTML)</label><textarea name="signature_html" rows="2" placeholder="-- <br/>我的签名"></textarea></div>
+          <div class="field"><label>签名 (纯文本)</label><textarea name="signature_text" rows="2" placeholder="-- 
+我的签名"></textarea></div>
           <div class="field"><label>IMAP Host</label><input name="imap_host" placeholder="${t("accounts.auto", "留空自动匹配")}" /></div>
           <div class="field"><label>SMTP Host</label><input name="smtp_host" placeholder="${t("accounts.auto", "留空自动匹配")}" /></div>
         </div>
@@ -1490,6 +1533,8 @@ async function renderAccounts() {
           email_address: form.get("email_address"),
           auth_type: form.get("auth_type"),
           secret: form.get("secret"),
+          signature_html: form.get("signature_html") || null,
+          signature_text: form.get("signature_text") || null,
           imap_host: form.get("imap_host") || null,
           smtp_host: form.get("smtp_host") || null,
         },
@@ -1769,9 +1814,21 @@ function showEditAccountModal(acct) {
             <option value="sms_code" ${acct.auth_type === "sms_code" ? "selected" : ""}>${t("accounts.authSmsCode","手机验证码")}</option>
           </select></div>
           <div class="field"><label>${t("accounts.newPasswordHint","新密码（留空不修改）")}</label><input name="secret" type="password" /></div>
+          <div class="field"><label>签名 (HTML)</label><textarea name="signature_html" rows="2" placeholder="-- <br/>我的签名">${esc(acct.signature_html || "")}</textarea></div>
+          <div class="field"><label>签名 (纯文本)</label><textarea name="signature_text" rows="2" placeholder="-- 
+我的签名">${esc(acct.signature_text || "")}</textarea></div>
           <div class="field"><label>IMAP Host</label><input name="imap_host" value="${esc(acct.imap_host || "")}" /></div>
           <div class="field"><label>SMTP Host</label><input name="smtp_host" value="${esc(acct.smtp_host || "")}" /></div>
         </div>
+        <h4 style="margin-top:14px">自动回复</h4>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="auto_reply_enabled" ${acct.auto_reply_enabled ? "checked" : ""} /> 启用自动回复</label>
+        </div>
+        <div class="field"><label>回复主题</label><input name="auto_reply_subject" value="${esc(acct.auto_reply_subject || '')}" placeholder="自动回复" /></div>
+        <div class="field"><label>回复内容</label><textarea name="auto_reply_body" rows="3" placeholder="感谢您的来信，我会尽快回复。">${esc(acct.auto_reply_body || '')}</textarea></div>
+        <div class="field"><label>起始时间（可选）</label><input type="datetime-local" name="auto_reply_start" value="${acct.auto_reply_start ? esc(acct.auto_reply_start).slice(0,16) : ''}" /></div>
+        <div class="field"><label>结束时间（可选）</label><input type="datetime-local" name="auto_reply_end" value="${acct.auto_reply_end ? esc(acct.auto_reply_end).slice(0,16) : ''}" /></div>
+        <div class="field"><label>同发件人冷却天数（0=不限）</label><input type="number" name="auto_reply_days" value="${acct.auto_reply_days || 0}" min="0" /></div>
         <div class="btn-row">
           <button type="button" class="btn" id="edit-cancel">${t("common.cancel","取消")}</button>
           <button type="submit" class="btn primary">${t("common.save","保存")}</button>
@@ -1791,6 +1848,14 @@ function showEditAccountModal(acct) {
       display_name: form.get("display_name"),
       email_address: form.get("email_address"),
       auth_type: form.get("auth_type"),
+      signature_html: form.get("signature_html") || null,
+      signature_text: form.get("signature_text") || null,
+      auto_reply_enabled: form.get("auto_reply_enabled") === "on",
+      auto_reply_subject: form.get("auto_reply_subject") || null,
+      auto_reply_body: form.get("auto_reply_body") || null,
+      auto_reply_start: form.get("auto_reply_start") || null,
+      auto_reply_end: form.get("auto_reply_end") || null,
+      auto_reply_days: form.get("auto_reply_days") ? parseInt(form.get("auto_reply_days")) : 0,
       imap_host: form.get("imap_host") || null,
       smtp_host: form.get("smtp_host") || null,
     };
@@ -2080,6 +2145,7 @@ function renderComposeWithTo(toEmail) {
         <div class="btn-row" style="justify-content:flex-start">
           <button class="btn primary" type="submit" id="compose-send">${t("compose.send", "发送")}</button>
           <button class="btn" type="button" id="compose-draft">${t("compose.saveDraft", "保存草稿")}</button>
+          <button class="btn" type="button" id="compose-schedule">⏱️ 定时发送</button>
           <button class="btn" type="button" id="compose-cancel">${t("compose.cancel", "取消")}</button>
         </div>
       </form>
@@ -2157,6 +2223,42 @@ function renderComposeWithTo(toEmail) {
     toast(t("compose.draftSaved", "草稿已保存。"));
   });
 
+  // ── 定时发送 ──
+  document.querySelector("#compose-schedule").addEventListener("click", async () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    const y = tomorrow.getFullYear();
+    const M = String(tomorrow.getMonth() + 1).padStart(2, "0");
+    const d = String(tomorrow.getDate()).padStart(2, "0");
+    const hh = String(tomorrow.getHours()).padStart(2, "0");
+    const mm = String(tomorrow.getMinutes()).padStart(2, "0");
+    const defaultTime = `${y}-${M}-${d} ${hh}:${mm}`;
+    const userInput = prompt("选择发送时间 (YYYY-MM-DD HH:MM)", defaultTime);
+    if (!userInput) return;
+    const isoTime = new Date(userInput).toISOString();
+    const form = new FormData(document.querySelector("#compose-form"));
+    const payload = {
+      mailbox_id: Number(form.get("mailbox_id")),
+      recipients: String(form.get("recipients")).split(",").map((item) => item.trim()).filter(Boolean),
+      subject: form.get("subject"),
+      body: form.get("body"),
+      format: form.get("format"),
+      encryption_mode: form.get("encryption_mode"),
+      attachment_ids: composeAttachments.map((a) => a.id),
+      in_reply_to: draft.in_reply_to || null,
+      scheduled_at: isoTime,
+    };
+    try {
+      const result = await api("/api/mail/schedule", { method: "POST", body: payload });
+      toast(result.message);
+      localStorage.removeItem("wuyou.draft");
+      document.querySelector("#compose-form").reset();
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  });
+
   // ── 取消 ──
   document.querySelector("#compose-cancel").addEventListener("click", () => {
     if (confirm(t("compose.cancelConfirm", "确定要取消吗？未保存的内容将会丢失。"))) {
@@ -2181,6 +2283,7 @@ function renderComposeWithTo(toEmail) {
         format: form.get("format"),
         encryption_mode: form.get("encryption_mode"),
         attachment_ids: composeAttachments.map((a) => a.id),
+        in_reply_to: draft.in_reply_to || null,
       };
       const result = await api("/api/mail/send", { method: "POST", body: payload });
       toast(result.message);
@@ -2925,6 +3028,61 @@ async function showSyncJobsModal() {
       .join("");
   } catch (error) {
     const list = overlay.querySelector("#sync-jobs-list");
+    list.innerHTML = `<div class="empty-state" style="color:#e74c3c">${esc(error.message)}</div>`;
+  }
+}
+
+async function renderScheduled() {
+  const workspace = document.querySelector("#workspace");
+  workspace.className = "workspace";
+  workspace.innerHTML = `
+    <section class="page-pane">
+      <div class="page-header"><h2>${t("scheduled.title", "定时邮件")}</h2></div>
+      <div id="scheduled-list"><div class="empty-state">${t("common.loading", "加载中...")}</div></div>
+    </section>
+  `;
+
+  const list = document.querySelector("#scheduled-list");
+  try {
+    const data = await api("/api/mail/scheduled");
+    const items = data.items || data;
+    if (!items || !items.length) {
+      list.innerHTML = `<div class="empty-state">${t("scheduled.empty", "暂无定时邮件。")}</div>`;
+      return;
+    }
+    list.innerHTML = items
+      .map((item) => {
+        const status = item.status || "pending";
+        const statusLabel = status === "pending" ? t("sync.statusPending", "等待中") : status;
+        return `<div class="item-card">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <strong>${esc(item.subject || "")}</strong>
+              <p class="muted" style="margin:4px 0">${t("compose.to", "收件人")}: ${esc(item.to_address || item.recipient || "")}</p>
+              <p class="muted" style="margin:0;font-size:0.85em">${t("scheduled.at", "发送时间")}: ${esc(String(item.scheduled_at || "").slice(0, 19))}</p>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="tag" style="background:${status === "pending" ? "#f39c12" : "#2ecc71"};color:#fff;white-space:nowrap">${esc(statusLabel)}</span>
+              ${status === "pending" ? `<button class="btn btn-sm" data-cancel="${item.id}">${t("scheduled.cancel", "取消")}</button>` : ""}
+            </div>
+          </div>
+        </div>`;
+      })
+      .join("");
+
+    list.querySelectorAll("[data-cancel]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.cancel;
+        try {
+          await api(`/api/mail/scheduled/${id}`, { method: "DELETE" });
+          toast(t("scheduled.cancelled", "定时邮件已取消。"));
+          await renderScheduled();
+        } catch (error) {
+          toast(error.message, "error");
+        }
+      });
+    });
+  } catch (error) {
     list.innerHTML = `<div class="empty-state" style="color:#e74c3c">${esc(error.message)}</div>`;
   }
 }

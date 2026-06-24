@@ -426,6 +426,31 @@ def send_email(account: dict[str, Any], secret: str, request: SendMailRequest, a
         message["X-WuYou-Encryption"] = "pgp-e2e"
     else:
         message["X-WuYou-Encryption"] = "tls-auto"
+
+    if request.in_reply_to:
+        from app.core.database import db as _db
+        orig = _db.query_one("SELECT external_id, raw_headers FROM messages WHERE id = ?", (request.in_reply_to,))
+        if orig:
+            message["In-Reply-To"] = orig["external_id"] or ""
+            try:
+                hdrs = json.loads(orig["raw_headers"]) if isinstance(orig["raw_headers"], str) else (orig["raw_headers"] or {})
+            except Exception:
+                hdrs = {}
+            refs = hdrs.get("References", "") if isinstance(hdrs, dict) else ""
+            existing = refs.split() if refs else []
+            existing.append(orig["external_id"] or "")
+            if len(existing) > 20:
+                existing = existing[-20:]
+            message["References"] = " ".join(existing)
+
+    sig_text = account.get("signature_text", "") or ""
+    sig_html = account.get("signature_html", "") or ""
+    if sig_text or sig_html:
+        if not pgp_encrypted:
+            text_body = text_body + "\n\n-- \n" + sig_text if sig_text else text_body
+        if html_body and sig_html:
+            html_body = html_body + "<br/><br/>-- <br/>" + sig_html
+
     message.set_content(text_body or "此邮件包含 HTML 内容。")
     if html_body:
         message.add_alternative(html_body, subtype="html")

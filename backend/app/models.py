@@ -81,6 +81,14 @@ class MailboxCreate(BaseModel):
     smtp_host: str | None = None
     smtp_port: int | None = None
     smtp_ssl: bool = True
+    signature_html: str = ""
+    signature_text: str = ""
+    auto_reply_enabled: bool = False
+    auto_reply_subject: str = ""
+    auto_reply_body: str = ""
+    auto_reply_start: str | None = None
+    auto_reply_end: str | None = None
+    auto_reply_days: int = 0
 
 
 class MailboxOut(BaseModel):
@@ -97,6 +105,14 @@ class MailboxOut(BaseModel):
     auth_type: str
     username: str
     sync_enabled: bool
+    signature_html: str = ""
+    signature_text: str = ""
+    auto_reply_enabled: bool = False
+    auto_reply_subject: str = ""
+    auto_reply_body: str = ""
+    auto_reply_start: str | None = None
+    auto_reply_end: str | None = None
+    auto_reply_days: int = 0
     created_at: str
 
 
@@ -139,6 +155,37 @@ class SendMailRequest(BaseModel):
     format: Literal["text", "markdown", "html"] = "text"
     encryption_mode: Literal["auto", "tls_only", "pgp"] = "auto"
     attachment_ids: list[int] = []
+    in_reply_to: int | None = None
+
+
+class ScheduledMailCreate(BaseModel):
+    mailbox_id: int
+    recipients: list[EmailStr] = Field(min_length=1)
+    cc: list[EmailStr] = []
+    bcc: list[EmailStr] = []
+    subject: str = Field(min_length=1, max_length=256)
+    body: str = Field(default="", max_length=2_000_000)
+    format: Literal["text", "markdown", "html"] = "text"
+    attachment_ids: list[int] = []
+    scheduled_at: str = Field(min_length=1)
+
+
+class ScheduledMailOut(BaseModel):
+    id: int
+    mailbox_id: int
+    recipients: str
+    cc: str
+    subject: str
+    body_text: str
+    scheduled_at: str
+    status: str
+    error: str | None = None
+    sent_at: str | None = None
+    created_at: str
+
+
+class ReplyRequest(BaseModel):
+    reply_mode: Literal["reply", "reply_all", "forward"]
 
 
 class TranslationRequest(BaseModel):

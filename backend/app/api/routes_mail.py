@@ -12,7 +12,15 @@ from app.api.deps import get_current_user, json_loads
 from app.core.config import get_settings
 from app.core.database import db
 from app.core.security import decrypt_secret, utc_iso
-from app.models import MessageOut, SendMailRequest, TagCreate, TagOut
+from app.models import (
+    MessageOut,
+    ReplyRequest,
+    ScheduledMailCreate,
+    ScheduledMailOut,
+    SendMailRequest,
+    TagCreate,
+    TagOut,
+)
 from app.services.mail_client import send_email
 
 from collections import defaultdict
@@ -257,6 +265,108 @@ def send(payload: SendMailRequest, current_user: dict = Depends(get_current_user
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"发信失败：{exc}") from exc
     return result
+
+
+@router.post("/messages/{message_id}/star")
+def toggle_star(message_id: int, current_user: dict = Depends(get_current_user)):
+    row = db.query_one("SELECT id, starred FROM messages WHERE id = ? AND user_id = ?", (message_id, current_user["user_id"]))
+    if not row:
+        raise HTTPException(status_code=404, detail="邮件不存在。")
+    new_val = 0 if row["starred"] else 1
+    db.execute("UPDATE messages SET starred = ? WHERE id = ?", (new_val, message_id))
+    return {"starred": bool(new_val)}
+
+
+@router.get("/messages/{message_id}/reply")
+def get_reply_template(message_id: int, mode: str = Query("reply"), current_user: dict = Depends(get_current_user)):
+    row = db.query_one("SELECT * FROM messages WHERE id = ? AND user_id = ?", (message_id, current_user["user_id"]))
+    if not row:
+        raise HTTPException(status_code=404, detail="邮件不存在。")
+    sender = row["sender"]
+    subject = row["subject"]
+    body = row["body_text"] or row["snippet"]
+    recipients_raw = json_loads(row["recipients"]) if isinstance(row["recipients"], str) else row["recipients"]
+    recipients_list = recipients_raw if isinstance(recipients_raw, list) else []
+    quoted = "\n".join(f"> {line}" for line in body.split("\n")[:20])
+    if mode == "reply":
+        to_list = [sender]
+        cc_list = []
+        prefix = "Re: " if not subject.startswith("Re:") else ""
+    elif mode == "reply_all":
+        to_list = [sender]
+        my_addrs = {a.get("email_address", "") for a in (current_user.get("accounts") or [])}
+        cc_list = [r for r in recipients_list if r not in to_list and r not in my_addrs]
+        prefix = "Re: " if not subject.startswith("Re:") else ""
+    elif mode == "forward":
+        to_list = []
+        cc_list = []
+        prefix = "Fwd: " if not subject.startswith("Fwd:") else ""
+        quoted = f"-------- 原始邮件 --------\n发件人: {sender}\n日期: {row['received_at']}\n主题: {subject}\n\n{body}"
+    else:
+        raise HTTPException(status_code=400, detail="未知回复模式。")
+    return {
+        "to": to_list,
+        "cc": cc_list,
+        "subject": f"{prefix}{subject}",
+        "body": f"\n\n{quoted}",
+        "in_reply_to": message_id,
+    }
+
+
+@router.post("/schedule")
+def create_scheduled_mail(payload: ScheduledMailCreate, current_user: dict = Depends(get_current_user)):
+    account = db.query_one("SELECT id FROM mailbox_accounts WHERE id = ? AND user_id = ?", (payload.mailbox_id, current_user["user_id"]))
+    if not account:
+        raise HTTPException(status_code=404, detail="发件邮箱不存在。")
+    now = utc_iso()
+    cursor = db.execute(
+        """
+        INSERT INTO scheduled_messages(
+            user_id, mailbox_id, recipients_json, cc_json, bcc_json,
+            subject, body_text, body_html, format, attachment_ids_json,
+            scheduled_at, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        """,
+        (
+            current_user["user_id"],
+            payload.mailbox_id,
+            json.dumps([str(r) for r in payload.recipients]),
+            json.dumps([str(r) for r in payload.cc]),
+            json.dumps([str(r) for r in payload.bcc]),
+            payload.subject,
+            payload.body,
+            payload.body if payload.format == "html" else "",
+            payload.format,
+            json.dumps(payload.attachment_ids),
+            payload.scheduled_at,
+            now,
+            now,
+        ),
+    )
+    return {"id": cursor.lastrowid, "message": "定时邮件已创建。"}
+
+
+@router.get("/scheduled", response_model=list[ScheduledMailOut])
+def list_scheduled_mails(current_user: dict = Depends(get_current_user)):
+    rows = db.query_all(
+        "SELECT * FROM scheduled_messages WHERE user_id = ? ORDER BY scheduled_at DESC",
+        (current_user["user_id"],),
+    )
+    return [ScheduledMailOut(
+        id=r["id"], mailbox_id=r["mailbox_id"], recipients=r["recipients_json"],
+        cc=r["cc_json"], subject=r["subject"], body_text=r["body_text"],
+        scheduled_at=r["scheduled_at"], status=r["status"],
+        error=r["error"], sent_at=r["sent_at"], created_at=r["created_at"],
+    ) for r in rows]
+
+
+@router.delete("/scheduled/{scheduled_id}")
+def delete_scheduled_mail(scheduled_id: int, current_user: dict = Depends(get_current_user)):
+    row = db.query_one("SELECT id FROM scheduled_messages WHERE id = ? AND user_id = ? AND status = 'pending'", (scheduled_id, current_user["user_id"]))
+    if not row:
+        raise HTTPException(status_code=404, detail="定时邮件不存在或已发送。")
+    db.execute("DELETE FROM scheduled_messages WHERE id = ?", (scheduled_id,))
+    return {"message": "定时邮件已取消。"}
 
 
 @router.get("/unread")

@@ -33,6 +33,14 @@ class MailboxUpdateRequest(BaseModel):
     smtp_port: int | None = None
     smtp_ssl: bool | None = None
     sync_enabled: bool | None = None
+    signature_html: str | None = None
+    signature_text: str | None = None
+    auto_reply_enabled: bool | None = None
+    auto_reply_subject: str | None = None
+    auto_reply_body: str | None = None
+    auto_reply_start: str | None = None
+    auto_reply_end: str | None = None
+    auto_reply_days: int | None = None
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
@@ -52,6 +60,14 @@ def _account_out(row) -> MailboxOut:
         auth_type=row["auth_type"],
         username=row["username"],
         sync_enabled=bool(row["sync_enabled"]),
+        signature_html=row["signature_html"] if "signature_html" in row.keys() else "",
+        signature_text=row["signature_text"] if "signature_text" in row.keys() else "",
+        auto_reply_enabled=bool(row["auto_reply_enabled"]) if "auto_reply_enabled" in row.keys() else False,
+        auto_reply_subject=row["auto_reply_subject"] if "auto_reply_subject" in row.keys() else "",
+        auto_reply_body=row["auto_reply_body"] if "auto_reply_body" in row.keys() else "",
+        auto_reply_start=row["auto_reply_start"] if "auto_reply_start" in row.keys() else None,
+        auto_reply_end=row["auto_reply_end"] if "auto_reply_end" in row.keys() else None,
+        auto_reply_days=int(row["auto_reply_days"] or 0) if "auto_reply_days" in row.keys() else 0,
         created_at=row["created_at"],
     )
 
@@ -92,8 +108,10 @@ def create_account(payload: MailboxCreate, current_user: dict = Depends(get_curr
         INSERT INTO mailbox_accounts(
             user_id, display_name, email_address, provider, imap_host, imap_port, imap_ssl,
             smtp_host, smtp_port, smtp_ssl, auth_type, username, encrypted_secret, sync_enabled,
+            signature_html, signature_text,
+            auto_reply_enabled, auto_reply_subject, auto_reply_body, auto_reply_start, auto_reply_end, auto_reply_days,
             created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             current_user["user_id"],
@@ -109,6 +127,14 @@ def create_account(payload: MailboxCreate, current_user: dict = Depends(get_curr
             payload.auth_type,
             payload.username or str(payload.email_address),
             encrypt_secret(payload.secret, get_settings().secret_key_path),
+            payload.signature_html or "",
+            payload.signature_text or "",
+            1 if payload.auto_reply_enabled else 0,
+            payload.auto_reply_subject or "",
+            payload.auto_reply_body or "",
+            payload.auto_reply_start,
+            payload.auto_reply_end,
+            payload.auto_reply_days or 0,
             now,
             now,
         ),
@@ -162,6 +188,22 @@ def update_account(account_id: int, payload: MailboxUpdateRequest, current_user:
         updates["smtp_ssl"] = 1 if payload.smtp_ssl else 0
     if payload.sync_enabled is not None:
         updates["sync_enabled"] = 1 if payload.sync_enabled else 0
+    if payload.signature_html is not None:
+        updates["signature_html"] = payload.signature_html
+    if payload.signature_text is not None:
+        updates["signature_text"] = payload.signature_text
+    if payload.auto_reply_enabled is not None:
+        updates["auto_reply_enabled"] = 1 if payload.auto_reply_enabled else 0
+    if payload.auto_reply_subject is not None:
+        updates["auto_reply_subject"] = payload.auto_reply_subject
+    if payload.auto_reply_body is not None:
+        updates["auto_reply_body"] = payload.auto_reply_body
+    if payload.auto_reply_start is not None:
+        updates["auto_reply_start"] = payload.auto_reply_start if payload.auto_reply_start else None
+    if payload.auto_reply_end is not None:
+        updates["auto_reply_end"] = payload.auto_reply_end if payload.auto_reply_end else None
+    if payload.auto_reply_days is not None:
+        updates["auto_reply_days"] = payload.auto_reply_days or 0
     if not updates:
         return _account_out(account)
     updates["updated_at"] = utc_iso()

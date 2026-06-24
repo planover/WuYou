@@ -13,9 +13,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -189,6 +191,159 @@ def _start_remote_sync() -> None:
     )
 
 
+# ── scheduled messages & auto-reply worker ────────────────────────────
+
+def _process_scheduled_messages() -> None:
+    """Process pending scheduled messages whose scheduled_at time has arrived."""
+    now = utc_iso()
+    pending = db.query_all(
+        "SELECT * FROM scheduled_messages WHERE status = 'pending' AND scheduled_at <= ?",
+        (now,),
+    )
+    for row in pending:
+        sm = dict(row)
+        try:
+            account = db.query_one(
+                "SELECT * FROM mailbox_accounts WHERE id = ? AND user_id = ?",
+                (sm["mailbox_id"], sm["user_id"]),
+            )
+            if not account:
+                db.execute(
+                    "UPDATE scheduled_messages SET status = 'failed', error = '发件账户不存在', updated_at = ? WHERE id = ?",
+                    (utc_iso(), sm["id"]),
+                )
+                continue
+
+            from app.core.security import decrypt_secret
+            from app.models import SendMailRequest
+            from app.services.mail_client import send_email
+
+            recipients = json.loads(sm["recipients_json"])
+            cc = json.loads(sm["cc_json"]) if sm["cc_json"] else []
+            bcc = json.loads(sm["bcc_json"]) if sm["bcc_json"] else []
+            attachment_ids = json.loads(sm["attachment_ids_json"]) if sm.get("attachment_ids_json") else []
+
+            attachments_data = []
+            if attachment_ids:
+                rows = db.query_all(
+                    "SELECT * FROM attachments WHERE id IN ({seq}) AND user_id = ?".format(
+                        seq=",".join("?" * len(attachment_ids))
+                    ),
+                    [*attachment_ids, sm["user_id"]],
+                )
+                attachments_data = [dict(r) for r in rows]
+
+            req = SendMailRequest(
+                mailbox_id=sm["mailbox_id"],
+                recipients=recipients,
+                cc=cc,
+                bcc=bcc,
+                subject=sm["subject"],
+                body=sm["body_text"],
+                format=sm.get("format", "text"),
+                attachment_ids=attachment_ids,
+            )
+            secret = decrypt_secret(account["encrypted_secret"], settings.secret_key_path)
+            send_email(dict(account), secret, req, attachments_data)
+            db.execute(
+                "UPDATE scheduled_messages SET status = 'sent', sent_at = ?, updated_at = ? WHERE id = ?",
+                (utc_iso(), utc_iso(), sm["id"]),
+            )
+            logger.info("Scheduled message %s sent successfully", sm["id"])
+        except Exception as exc:
+            db.execute(
+                "UPDATE scheduled_messages SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
+                (str(exc)[:500], utc_iso(), sm["id"]),
+            )
+            logger.warning("Scheduled message %s failed: %s", sm["id"], exc)
+
+
+def _process_auto_reply() -> None:
+    """Process auto-reply for unread messages on accounts with auto_reply_enabled."""
+    accounts = db.query_all(
+        "SELECT * FROM mailbox_accounts WHERE auto_reply_enabled = 1"
+    )
+    now = utc_iso()
+    skip_keywords = ["mailer-daemon", "noreply", "no-reply", "postmaster", "bounce", "auto-reply", "autoreply"]
+
+    for acct_row in accounts:
+        account = dict(acct_row)
+        # Check time window
+        if account.get("auto_reply_start") and account["auto_reply_start"] > now:
+            continue
+        if account.get("auto_reply_end") and account["auto_reply_end"] < now:
+            continue
+
+        cooldown_days = int(account.get("auto_reply_days") or 0)
+
+        unread_msgs = db.query_all(
+            "SELECT * FROM messages WHERE mailbox_id = ? AND user_id = ? AND unread = ?",
+            (account["id"], account["user_id"], 1),
+        )
+
+        for msg_row in unread_msgs:
+            msg = dict(msg_row)
+            reply_to = msg["sender"]
+            sender_lower = (reply_to or "").lower()
+
+            if any(kw in sender_lower for kw in skip_keywords):
+                continue
+
+            if cooldown_days > 0:
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=cooldown_days)).isoformat()
+                recent = db.query_one(
+                    "SELECT id FROM auto_reply_log WHERE user_id = ? AND mailbox_id = ? AND reply_to = ? AND sent_at > ?",
+                    (account["user_id"], account["id"], reply_to, cutoff),
+                )
+                if recent:
+                    continue
+
+            try:
+                from app.core.security import decrypt_secret
+                from app.models import SendMailRequest
+                from app.services.mail_client import send_email
+
+                reply_subject = account.get("auto_reply_subject") or "自动回复"
+                reply_body = account.get("auto_reply_body") or "感谢您的来信，我会尽快回复。"
+                req = SendMailRequest(
+                    mailbox_id=account["id"],
+                    recipients=[reply_to],
+                    subject=reply_subject,
+                    body=reply_body,
+                    format="text",
+                )
+                secret = decrypt_secret(account["encrypted_secret"], settings.secret_key_path)
+                send_email(dict(account), secret, req)
+                db.execute(
+                    "INSERT INTO auto_reply_log(user_id, mailbox_id, reply_to, sent_at) VALUES (?, ?, ?, ?)",
+                    (account["user_id"], account["id"], reply_to, utc_iso()),
+                )
+                logger.info("Auto-reply sent from %s to %s", account["email_address"], reply_to)
+            except Exception as exc:
+                logger.warning("Auto-reply failed from %s to %s: %s", account["email_address"], reply_to, exc)
+
+
+def _scheduled_worker_loop() -> None:
+    """Background loop processing scheduled messages and auto-reply."""
+    while True:
+        try:
+            _process_scheduled_messages()
+        except Exception:
+            logger.exception("scheduled messages error")
+        try:
+            _process_auto_reply()
+        except Exception:
+            logger.exception("auto-reply error")
+        time.sleep(30)
+
+
+def _start_scheduled_worker() -> None:
+    """启动定时发送和自动回复后台线程。"""
+    worker = threading.Thread(target=_scheduled_worker_loop, daemon=True)
+    worker.start()
+    logger.info("Scheduled messages & auto-reply worker started")
+
+
 # ── FastAPI events ───────────────────────────────────────────────────────
 
 @app.on_event("startup")
@@ -200,6 +355,9 @@ def startup() -> None:
         _start_inprocess_sync()
 
     _start_remote_sync()
+
+    # ── Scheduled messages & auto-reply background worker ──────────────
+    _start_scheduled_worker()
 
     # ── Hot-reload watcher ────────────────────────────────────────────
     if settings.hot_reload_enabled:
