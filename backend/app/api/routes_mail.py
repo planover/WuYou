@@ -7,6 +7,7 @@ import os
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from pydantic import BaseModel
 
 from app.api.deps import get_current_user, json_loads
 from app.core.config import get_settings
@@ -21,7 +22,7 @@ from app.models import (
     TagCreate,
     TagOut,
 )
-from app.services.mail_client import send_email
+from app.services.mail_client import create_imap_folder, delete_imap_folder, rename_imap_folder, save_draft_to_imap, send_email
 
 from collections import defaultdict
 
@@ -52,6 +53,7 @@ def _message_out(row, tag_map: dict[int, list[dict]] | None = None) -> MessageOu
         id=message_id,
         mailbox_id=row["mailbox_id"],
         folder=row["folder"],
+        folder_role=row.get("folder_role", "inbox"),
         subject=row["subject"],
         sender=row["sender"],
         recipients=json_loads(row["recipients"], []),
@@ -145,15 +147,16 @@ def inbox(
 
 @router.get("/folders")
 def list_folders(current_user: dict = Depends(get_current_user)):
-    """Return DISTINCT folder_role values with message counts for the current user."""
+    """Return DISTINCT folder_role values with message counts and folder IDs for the current user."""
     rows = db.query_all(
         """
-        SELECT folder_role, COUNT(*) AS count
-        FROM messages
-        WHERE user_id = ?
-        GROUP BY folder_role
+        SELECT m.folder_role, COUNT(*) AS count, mf.id AS folder_id, mf.mailbox_id, mf.imap_name, mf.display_name
+        FROM messages m
+        LEFT JOIN mailbox_folders mf ON mf.role = m.folder_role AND mf.user_id = m.user_id
+        WHERE m.user_id = ?
+        GROUP BY m.folder_role
         ORDER BY
-            CASE folder_role
+            CASE m.folder_role
                 WHEN 'inbox' THEN 1
                 WHEN 'sent' THEN 2
                 WHEN 'trash' THEN 3
@@ -165,6 +168,132 @@ def list_folders(current_user: dict = Depends(get_current_user)):
         (current_user["user_id"],),
     )
     return [dict(row) for row in rows]
+
+
+class CreateFolderRequest(BaseModel):
+    mailbox_id: int
+    folder_name: str
+    parent_folder: str | None = None
+
+
+class RenameFolderRequest(BaseModel):
+    new_name: str
+
+
+@router.post("/folders")
+def create_folder(payload: CreateFolderRequest, current_user: dict = Depends(get_current_user)):
+    account = db.query_one(
+        "SELECT * FROM mailbox_accounts WHERE id = ? AND user_id = ?",
+        (payload.mailbox_id, current_user["user_id"]),
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="邮箱账户不存在。")
+
+    folder_name = payload.folder_name.strip()
+    if not folder_name:
+        raise HTTPException(status_code=400, detail="文件夹名称不能为空。")
+
+    if payload.parent_folder:
+        imap_name = f"{payload.parent_folder}/{folder_name}"
+    else:
+        imap_name = folder_name
+
+    try:
+        create_imap_folder(
+            dict(account),
+            decrypt_secret(account["encrypted_secret"], get_settings().secret_key_path),
+            imap_name,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"创建文件夹失败：{exc}") from exc
+
+    now = utc_iso()
+    cursor = db.execute(
+        """INSERT INTO mailbox_folders(user_id, mailbox_id, role, imap_name, display_name, created_at, updated_at)
+           VALUES (?, ?, 'custom', ?, ?, ?, ?)""",
+        (current_user["user_id"], payload.mailbox_id, imap_name, folder_name, now, now),
+    )
+    return {
+        "id": cursor.lastrowid,
+        "mailbox_id": payload.mailbox_id,
+        "role": "custom",
+        "imap_name": imap_name,
+        "display_name": folder_name,
+    }
+
+
+@router.delete("/folders/{folder_id}")
+def delete_folder(folder_id: int, current_user: dict = Depends(get_current_user)):
+    folder = db.query_one(
+        "SELECT * FROM mailbox_folders WHERE id = ? AND user_id = ?",
+        (folder_id, current_user["user_id"]),
+    )
+    if not folder:
+        raise HTTPException(status_code=404, detail="文件夹不存在。")
+
+    account = db.query_one(
+        "SELECT * FROM mailbox_accounts WHERE id = ? AND user_id = ?",
+        (folder["mailbox_id"], current_user["user_id"]),
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="邮箱账户不存在。")
+
+    try:
+        delete_imap_folder(
+            dict(account),
+            decrypt_secret(account["encrypted_secret"], get_settings().secret_key_path),
+            folder["imap_name"],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"删除文件夹失败：{exc}") from exc
+
+    db.execute("DELETE FROM mailbox_folder_state WHERE folder_id = ?", (folder_id,))
+    db.execute("DELETE FROM mailbox_folders WHERE id = ?", (folder_id,))
+    return {"message": "文件夹已删除。"}
+
+
+@router.put("/folders/{folder_id}")
+def rename_folder(folder_id: int, payload: RenameFolderRequest, current_user: dict = Depends(get_current_user)):
+    folder = db.query_one(
+        "SELECT * FROM mailbox_folders WHERE id = ? AND user_id = ?",
+        (folder_id, current_user["user_id"]),
+    )
+    if not folder:
+        raise HTTPException(status_code=404, detail="文件夹不存在。")
+
+    new_name = payload.new_name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="文件夹名称不能为空。")
+
+    account = db.query_one(
+        "SELECT * FROM mailbox_accounts WHERE id = ? AND user_id = ?",
+        (folder["mailbox_id"], current_user["user_id"]),
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="邮箱账户不存在。")
+
+    old_imap = folder["imap_name"]
+    if "/" in old_imap:
+        new_imap = "/".join(old_imap.split("/")[:-1] + [new_name])
+    else:
+        new_imap = new_name
+
+    try:
+        rename_imap_folder(
+            dict(account),
+            decrypt_secret(account["encrypted_secret"], get_settings().secret_key_path),
+            old_imap,
+            new_imap,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"重命名文件夹失败：{exc}") from exc
+
+    now = utc_iso()
+    db.execute(
+        "UPDATE mailbox_folders SET imap_name = ?, display_name = ?, updated_at = ? WHERE id = ?",
+        (new_imap, new_name, now, folder_id),
+    )
+    return {"message": "文件夹已重命名。", "imap_name": new_imap, "display_name": new_name}
 
 
 @router.get("/messages/{message_id}", response_model=MessageOut)
@@ -371,10 +500,63 @@ def delete_scheduled_mail(scheduled_id: int, current_user: dict = Depends(get_cu
     return {"message": "定时邮件已取消。"}
 
 
+@router.post("/draft")
+def save_draft(payload: SendMailRequest, current_user: dict = Depends(get_current_user)):
+    account = db.query_one("SELECT * FROM mailbox_accounts WHERE id = ? AND user_id = ?", (payload.mailbox_id, current_user["user_id"]))
+    if not account:
+        raise HTTPException(status_code=404, detail="发件账户不存在。")
+    from app.services.mail_client import _build_raw_email
+    msg_bytes = _build_raw_email(dict(account), payload)
+    try:
+        secret = decrypt_secret(account["encrypted_secret"], get_settings().secret_key_path)
+        save_draft_to_imap(dict(account), secret, msg_bytes)
+    except Exception:
+        pass
+    now = utc_iso()
+    cursor = db.execute(
+        "INSERT INTO drafts(user_id, mailbox_id, recipients_json, cc_json, bcc_json, subject, body_text, body_html, format, imap_folder, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (current_user["user_id"], payload.mailbox_id,
+         json.dumps([str(r) for r in payload.recipients]),
+         json.dumps([str(r) for r in payload.cc]),
+         json.dumps([str(r) for r in payload.bcc]),
+         payload.subject, payload.body, "", payload.format, "Drafts", now, now))
+    return {"id": cursor.lastrowid, "message": "草稿已保存。"}
+
+
+@router.get("/drafts")
+def list_drafts(current_user: dict = Depends(get_current_user)):
+    rows = db.query_all("SELECT * FROM drafts WHERE user_id = ? ORDER BY updated_at DESC", (current_user["user_id"],))
+    return [{"id": r["id"], "mailbox_id": r["mailbox_id"], "recipients": json_loads(r["recipients_json"], []),
+             "subject": r["subject"], "body_text": r["body_text"], "format": r["format"],
+             "created_at": r["created_at"]} for r in rows]
+
+
+@router.delete("/draft/{draft_id}")
+def delete_draft(draft_id: int, current_user: dict = Depends(get_current_user)):
+    row = db.query_one("SELECT id FROM drafts WHERE id = ? AND user_id = ?", (draft_id, current_user["user_id"]))
+    if not row:
+        raise HTTPException(status_code=404, detail="草稿不存在。")
+    db.execute("DELETE FROM drafts WHERE id = ?", (draft_id,))
+    return {"message": "草稿已删除。"}
+
+
 @router.get("/unread")
 def unread_summary(current_user: dict = Depends(get_current_user)):
     row = db.query_one("SELECT COUNT(*) AS count FROM messages WHERE user_id = ? AND unread = 1", (current_user["user_id"],))
     return {"unread": row["count"]}
+
+
+@router.post("/messages/{message_id}/junk")
+def toggle_junk(message_id: int, current_user: dict = Depends(get_current_user)):
+    row = db.query_one("SELECT id, folder_role FROM messages WHERE id = ? AND user_id = ?", (message_id, current_user["user_id"]))
+    if not row:
+        raise HTTPException(status_code=404, detail="邮件不存在。")
+    if row["folder_role"] == "junk":
+        db.execute("UPDATE messages SET folder_role = ?, folder = ? WHERE id = ?", ("inbox", "inbox", message_id))
+        return {"junk": False}
+    else:
+        db.execute("UPDATE messages SET folder_role = ?, folder = ? WHERE id = ?", ("junk", "junk", message_id))
+        return {"junk": True}
 
 
 @router.get("/search")

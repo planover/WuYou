@@ -635,6 +635,7 @@ async function renderInbox(status = "all", query = "", folderRole = null) {
             const labels = { all: t("mail.folderAll", "全部"), inbox: t("mail.folderInbox", "收件箱"), sent: t("mail.folderSent", "已发送"), trash: t("mail.folderTrash", "垃圾箱"), archive: t("mail.folderArchive", "归档"), junk: t("mail.folderJunk", "垃圾邮件") };
             return `<button class="folder-tab ${role === r ? "active" : ""}" data-folder="${r}">${labels[r]}</button>`;
           }).join("")}
+          <button class="btn" id="manage-folders" style="font-size:11px;padding:2px 6px" title="${t("mail.manageFolders", "管理文件夹")}">📁+</button>
         </div>
         <div id="mail-list"><div class="empty-state">${t("common.loading", "加载中...")}</div></div>
       </section>
@@ -649,6 +650,7 @@ async function renderInbox(status = "all", query = "", folderRole = null) {
   document.querySelectorAll(".folder-tab").forEach((btn) => {
     btn.addEventListener("click", () => renderInbox(status, query, btn.dataset.folder));
   });
+  document.querySelector("#manage-folders").addEventListener("click", showFolderManagerModal);
   document.querySelector("#filter-apply").addEventListener("click", () => {
     inboxFilters.sender = document.querySelector("#filter-sender")?.value?.trim() || "";
     inboxFilters.dateFrom = document.querySelector("#filter-date-from")?.value || "";
@@ -823,6 +825,7 @@ function renderReader(message) {
         <button class="btn" id="reply-all-mail">↩️↩️ ${t("mail.replyAll", "回复全部")}</button>
         <button class="btn" id="forward-mail">↪️ ${t("mail.forward", "转发")}</button>
         <button class="btn" id="translate-mail">${t("mail.translate", "翻译")}</button>
+        <button class="btn" id="junk-mail">${message.folder_role === "junk" ? t("mail.notJunk", "非垃圾邮件") : t("mail.junk", "垃圾邮件")}</button>
         ${
           message.body_html && !message.remote_content_allowed
             ? `<button class="btn" id="allow-remote">${t("mail.loadRemote", "加载远程内容")}</button>`
@@ -881,6 +884,17 @@ function renderReader(message) {
   document.querySelector("#reply-mail").addEventListener("click", () => doReply("reply"));
   document.querySelector("#reply-all-mail").addEventListener("click", () => doReply("reply_all"));
   document.querySelector("#forward-mail").addEventListener("click", () => doReply("forward"));
+  document.querySelector("#junk-mail").addEventListener("click", async () => {
+    try {
+      const result = await api(`/api/mail/messages/${message.id}/junk`, { method: "POST" });
+      toast(result.junk ? t("mail.markedJunk", "已标记为垃圾邮件。") : t("mail.markedNotJunk", "已移出垃圾邮件。"));
+      const updated = await api(`/api/mail/messages/${message.id}`);
+      state.selectedMessage = updated;
+      renderReader(updated);
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  });
 }
 
 function pollJobStatus(jobId, onUpdate) {
@@ -1020,10 +1034,15 @@ function renderMonthGrid(year, month) {
   const grid = document.querySelector("#cal-grid");
   const today = new Date();
 
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const fromDate = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const toDate = `${year}-${String(month + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  const expandedEvents = expandRecurringEvents(calendarState.events, fromDate, toDate);
+
   const eventMap = {};
-  calendarState.events.forEach((ev) => {
+  expandedEvents.forEach((ev) => {
     const meta = ev.meta_json || {};
-    const startDate = meta.start_at || "";
+    const startDate = ev._recurring_date || (meta.start_at || "");
     const dateKey = String(startDate).slice(0, 10);
     if (!eventMap[dateKey]) eventMap[dateKey] = [];
     eventMap[dateKey].push(ev);
@@ -1111,10 +1130,16 @@ function renderWeekGrid(year, month) {
   const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
   startOfWeek.setDate(startOfWeek.getDate() + mondayOffset);
 
+  const weekEnd = new Date(startOfWeek);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+  const fromDate = startOfWeek.toISOString().slice(0, 10);
+  const toDate = weekEnd.toISOString().slice(0, 10);
+  const expandedEvents = expandRecurringEvents(calendarState.events, fromDate, toDate);
+
   const eventMap = {};
-  calendarState.events.forEach((ev) => {
+  expandedEvents.forEach((ev) => {
     const meta = ev.meta_json || {};
-    const startDate = meta.start_at || "";
+    const startDate = ev._recurring_date || (meta.start_at || "");
     const dateKey = String(startDate).slice(0, 10);
     if (!eventMap[dateKey]) eventMap[dateKey] = [];
     eventMap[dateKey].push(ev);
@@ -1172,9 +1197,10 @@ function renderDayGrid(year, month) {
   const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   const isToday = date.toDateString() === today.toDateString();
 
-  const dayEvents = calendarState.events.filter((ev) => {
+  const expandedEvents = expandRecurringEvents(calendarState.events, dateStr, dateStr);
+  const dayEvents = expandedEvents.filter((ev) => {
     const meta = ev.meta_json || {};
-    const startDate = meta.start_at || "";
+    const startDate = ev._recurring_date || (meta.start_at || "");
     return String(startDate).slice(0, 10) === dateStr;
   });
 
@@ -1229,6 +1255,8 @@ function showEventModal(dateStr, existingEvent) {
   const evAllDay = isEdit ? !!evMeta.all_day : false;
   const evLocation = isEdit ? evMeta.location || "" : "";
   const evColor = isEdit ? evMeta.color || "#4A90D9" : "#4A90D9";
+  const evRrule = isEdit ? evMeta.rrule || "" : "";
+  const evRruleEnd = isEdit ? evMeta.rrule_end_date || "" : "";
   const eventId = isEdit ? existingEvent.id : null;
 
   const colors = ["#4A90D9", "#E74C3C", "#2ECC71", "#F39C12", "#9B59B6"];
@@ -1259,6 +1287,21 @@ function showEventModal(dateStr, existingEvent) {
         <div class="field">
           <label>${t("calendar.eventLocation", "地点")}</label>
           <input id="cal-ev-location" value="${esc(evLocation)}" />
+        </div>
+        <div class="field">
+          <label>${t("calendar.eventRepeat", "重复")}</label>
+          <select id="cal-ev-rrule">
+            <option value="" ${evRrule === "" ? "selected" : ""}>${t("calendar.repeatNone", "不重复")}</option>
+            <option value="FREQ=DAILY;INTERVAL=1" ${evRrule === "FREQ=DAILY;INTERVAL=1" ? "selected" : ""}>${t("calendar.repeatDaily", "每天")}</option>
+            <option value="FREQ=WEEKLY;INTERVAL=1" ${evRrule === "FREQ=WEEKLY;INTERVAL=1" ? "selected" : ""}>${t("calendar.repeatWeekly", "每周")}</option>
+            <option value="FREQ=WEEKLY;INTERVAL=2" ${evRrule === "FREQ=WEEKLY;INTERVAL=2" ? "selected" : ""}>${t("calendar.repeatBiweekly", "每两周")}</option>
+            <option value="FREQ=MONTHLY;INTERVAL=1" ${evRrule === "FREQ=MONTHLY;INTERVAL=1" ? "selected" : ""}>${t("calendar.repeatMonthly", "每月")}</option>
+            <option value="FREQ=YEARLY;INTERVAL=1" ${evRrule === "FREQ=YEARLY;INTERVAL=1" ? "selected" : ""}>${t("calendar.repeatYearly", "每年")}</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>${t("calendar.eventRepeatEnd", "重复截止")}</label>
+          <input id="cal-ev-rrule-end" type="date" value="${esc(evRruleEnd)}" />
         </div>
         <div class="field wide">
           <label>${t("calendar.eventColor", "颜色")}</label>
@@ -1294,6 +1337,8 @@ function showEventModal(dateStr, existingEvent) {
   overlay.querySelector("#cal-ev-save").addEventListener("click", async () => {
     const startVal = overlay.querySelector("#cal-ev-start").value;
     const endVal = overlay.querySelector("#cal-ev-end").value;
+    const rruleVal = overlay.querySelector("#cal-ev-rrule").value;
+    const rruleEndVal = overlay.querySelector("#cal-ev-rrule-end").value;
     const payload = {
       kind: "calendar_event",
       title: overlay.querySelector("#cal-ev-title").value,
@@ -1303,6 +1348,8 @@ function showEventModal(dateStr, existingEvent) {
         all_day: overlay.querySelector("#cal-ev-allday").checked,
         location: overlay.querySelector("#cal-ev-location").value || null,
         color: overlay.querySelector("#cal-ev-color").value,
+        rrule: rruleVal || null,
+        rrule_end_date: rruleEndVal || null,
       },
     };
     try {
@@ -1332,6 +1379,84 @@ function showEventModal(dateStr, existingEvent) {
   }
 }
 
+function expandRecurringEvents(events, fromDate, toDate) {
+  const result = [];
+  const from = new Date(fromDate);
+  const to = new Date(toDate);
+  to.setHours(23, 59, 59, 999);
+
+  events.forEach((ev) => {
+    const meta = ev.meta_json || {};
+    const rrule = meta.rrule;
+    if (!rrule) { result.push(ev); return; }
+
+    const startAt = meta.start_at;
+    if (!startAt) { result.push(ev); return; }
+
+    const rruleEndDate = meta.rrule_end_date;
+    const endLimit = rruleEndDate ? new Date(rruleEndDate) : new Date(to);
+    endLimit.setHours(23, 59, 59, 999);
+
+    const freqMatch = rrule.match(/FREQ=(\w+)/);
+    const intervalMatch = rrule.match(/INTERVAL=(\d+)/);
+    if (!freqMatch) { result.push(ev); return; }
+
+    const freq = freqMatch[1];
+    const interval = intervalMatch ? parseInt(intervalMatch[1]) : 1;
+    const byDayMatch = rrule.match(/BYDAY=([\w,]+)/);
+    const byDay = byDayMatch ? byDayMatch[1].split(",") : null;
+
+    const current = new Date(startAt);
+    const dayOfWeekMap = { "MO": 1, "TU": 2, "WE": 3, "TH": 4, "FR": 5, "SA": 6, "SU": 0 };
+
+    while (current <= endLimit) {
+      if (current >= from) {
+        const dateStr = current.toISOString().slice(0, 10);
+        const expanded = { ...ev, _recurring_date: dateStr };
+        result.push(expanded);
+      }
+
+      switch (freq) {
+        case "DAILY":
+          current.setDate(current.getDate() + interval);
+          break;
+        case "WEEKLY":
+          if (byDay) {
+            let found = false;
+            const currentDay = current.getDay();
+            const orderedDays = byDay.map(d => dayOfWeekMap[d]).sort((a, b) => a - b);
+            for (const targetDay of orderedDays) {
+              if (targetDay > currentDay || (currentDay > orderedDays[orderedDays.length - 1] && targetDay <= orderedDays[0])) {
+                let diff = targetDay - currentDay;
+                if (diff <= 0) diff += 7;
+                current.setDate(current.getDate() + diff + (interval - 1) * 7);
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              current.setDate(current.getDate() + interval * 7);
+            }
+          } else {
+            current.setDate(current.getDate() + interval * 7);
+          }
+          break;
+        case "MONTHLY":
+          current.setMonth(current.getMonth() + interval);
+          break;
+        case "YEARLY":
+          current.setFullYear(current.getFullYear() + interval);
+          break;
+        default:
+          result.push(ev);
+          return;
+      }
+    }
+  });
+
+  return result;
+}
+
 function renderCompose() {
   const workspace = document.querySelector("#workspace");
   // 恢复草稿（如果存在）
@@ -1352,10 +1477,21 @@ function renderCompose() {
             <div class="format-toolbar" style="margin-bottom:8px;display:flex;gap:4px">
               <button type="button" class="btn" data-format="bold" title="${t("compose.toolbarBold","加粗")}"><b>B</b></button>
               <button type="button" class="btn" data-format="italic" title="${t("compose.toolbarItalic","斜体")}"><i>I</i></button>
-              <button type="button" class="btn" data-format="list" title="${t("compose.toolbarList","无序列表")}">•</button>
+              <button type="button" class="btn" data-format="underline" title="${t("compose.toolbarUnderline","下划线")}"><u>U</u></button>
+              <button type="button" class="btn" data-format="strikethrough" title="${t("compose.toolbarStrikethrough","删除线")}"><s>S</s></button>
+              <select data-format="fontSize" style="width:80px">
+                <option value="1">${t("compose.fontSizeSmall","小")}</option>
+                <option value="3" selected>${t("compose.fontSizeMedium","中")}</option>
+                <option value="5">${t("compose.fontSizeLarge","大")}</option>
+                <option value="7">${t("compose.fontSizeHuge","超大")}</option>
+              </select>
+              <button type="button" class="btn" data-format="insertUnorderedList" title="${t("compose.toolbarList","无序列表")}">•</button>
+              <button type="button" class="btn" data-format="insertOrderedList" title="${t("compose.toolbarOrderedList","有序列表")}">1.</button>
               <button type="button" class="btn" data-format="link" title="${t("compose.toolbarLink","插入链接")}">🔗</button>
+              <button type="button" class="btn" data-format="removeFormat" title="${t("compose.toolbarClearFormat","清除")}">Tx</button>
             </div>
-            <textarea name="body" id="compose-body">${esc(draft.body || "")}</textarea>
+            <div id="compose-body" contenteditable="true" style="min-height:200px;padding:8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);outline:none;overflow-y:auto;max-height:500px">${draft.body || ""}</div>
+            <input type="hidden" name="body" id="compose-body-hidden" value="" />
           </div>
           <div class="field wide">
             <label>${t("compose.attachments", "附件")}</label>
@@ -1378,22 +1514,26 @@ function renderCompose() {
 
   renderGroupChips();
 
-  // ── 格式工具栏：在光标位置插入 Markdown 标记 ──
-  const bodyTextarea = document.querySelector("#compose-body");
   document.querySelectorAll(".format-toolbar [data-format]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const fmt = btn.dataset.format;
-      const ta = bodyTextarea;
-      const start = ta.selectionStart;
-      const end = ta.selectionEnd;
-      const selected = ta.value.substring(start, end);
-      let before = "", after = "";
-      if (fmt === "bold") { before = "**"; after = "**"; }
-      else if (fmt === "italic") { before = "*"; after = "*"; }
-      else if (fmt === "list") { before = "\n- "; after = ""; }
-      else if (fmt === "link") { before = "["; after = `](${selected || "url"})`; }
-      ta.setRangeText(before + selected + after, start, end, "select");
-      ta.focus();
+      const editor = document.querySelector("#compose-body");
+      editor.focus();
+      if (fmt === "link") {
+        const url = prompt("输入链接 URL:", "https://");
+        if (url) document.execCommand("createLink", false, url);
+      } else if (fmt === "fontSize") {
+        // handled by change event
+      } else {
+        document.execCommand(fmt, false, null);
+      }
+    });
+  });
+  document.querySelectorAll(".format-toolbar select[data-format]").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      const editor = document.querySelector("#compose-body");
+      editor.focus();
+      document.execCommand("fontSize", false, sel.value);
     });
   });
 
@@ -1436,17 +1576,19 @@ function renderCompose() {
   });
 
   // ── 保存草稿 ──
-  document.querySelector("#compose-draft").addEventListener("click", () => {
+  document.querySelector("#compose-draft").addEventListener("click", async () => {
+    const bodyHtml = document.querySelector("#compose-body").innerHTML;
     const form = new FormData(document.querySelector("#compose-form"));
     const draftData = {
-      mailbox_id: form.get("mailbox_id"),
-      recipients: form.get("recipients"),
-      subject: form.get("subject"),
-      body: form.get("body"),
-      format: form.get("format"),
+      mailbox_id: Number(form.get("mailbox_id")) || 0,
+      recipients: String(form.get("recipients") || "").split(",").map(s => s.trim()).filter(Boolean),
+      subject: form.get("subject") || "",
+      body: bodyHtml,
+      format: "html",
     };
-    localStorage.setItem("wuyou.draft", JSON.stringify(draftData));
-    toast(t("compose.draftSaved", "草稿已保存。"));
+    if (!draftData.mailbox_id) { toast(t("compose.selectAccount", "请选择发件账户"), "error"); return; }
+    await api("/api/mail/draft", { method: "POST", body: { ...draftData, cc: [], bcc: [], encryption_mode: "auto", attachment_ids: [] } });
+    toast(t("compose.draftSaved", "草稿已保存至服务器。"));
   });
 
   // ── 取消 ──
@@ -1465,12 +1607,15 @@ function renderCompose() {
     sendBtn.disabled = true;
     sendBtn.textContent = t("compose.sending", "发送中...");
     try {
+      const bodyHtml = document.querySelector("#compose-body").innerHTML;
+      const bodyText = document.querySelector("#compose-body").innerText;
+      document.querySelector("#compose-body-hidden").value = bodyText;
       const payload = {
         mailbox_id: Number(form.get("mailbox_id")),
         recipients: String(form.get("recipients")).split(",").map((item) => item.trim()).filter(Boolean),
         subject: form.get("subject"),
-        body: form.get("body"),
-        format: form.get("format"),
+        body: bodyText,
+        format: "html",
         encryption_mode: form.get("encryption_mode"),
         attachment_ids: composeAttachments.map((a) => a.id),
         in_reply_to: draft.in_reply_to || null,
@@ -2512,10 +2657,21 @@ function renderComposeWithTo(toEmail) {
             <div class="format-toolbar" style="margin-bottom:8px;display:flex;gap:4px">
               <button type="button" class="btn" data-format="bold" title="${t("compose.toolbarBold","加粗")}"><b>B</b></button>
               <button type="button" class="btn" data-format="italic" title="${t("compose.toolbarItalic","斜体")}"><i>I</i></button>
-              <button type="button" class="btn" data-format="list" title="${t("compose.toolbarList","无序列表")}">•</button>
+              <button type="button" class="btn" data-format="underline" title="${t("compose.toolbarUnderline","下划线")}"><u>U</u></button>
+              <button type="button" class="btn" data-format="strikethrough" title="${t("compose.toolbarStrikethrough","删除线")}"><s>S</s></button>
+              <select data-format="fontSize" style="width:80px">
+                <option value="1">${t("compose.fontSizeSmall","小")}</option>
+                <option value="3" selected>${t("compose.fontSizeMedium","中")}</option>
+                <option value="5">${t("compose.fontSizeLarge","大")}</option>
+                <option value="7">${t("compose.fontSizeHuge","超大")}</option>
+              </select>
+              <button type="button" class="btn" data-format="insertUnorderedList" title="${t("compose.toolbarList","无序列表")}">•</button>
+              <button type="button" class="btn" data-format="insertOrderedList" title="${t("compose.toolbarOrderedList","有序列表")}">1.</button>
               <button type="button" class="btn" data-format="link" title="${t("compose.toolbarLink","插入链接")}">🔗</button>
+              <button type="button" class="btn" data-format="removeFormat" title="${t("compose.toolbarClearFormat","清除")}">Tx</button>
             </div>
-            <textarea name="body" id="compose-body">${esc(draft.body || "")}</textarea>
+            <div id="compose-body" contenteditable="true" style="min-height:200px;padding:8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);outline:none;overflow-y:auto;max-height:500px">${draft.body || ""}</div>
+            <input type="hidden" name="body" id="compose-body-hidden" value="" />
           </div>
           <div class="field wide">
             <label>${t("compose.attachments", "附件")}</label>
@@ -2538,22 +2694,26 @@ function renderComposeWithTo(toEmail) {
 
   renderGroupChips();
 
-  // ── 格式工具栏 ──
-  const bodyTextarea = document.querySelector("#compose-body");
   document.querySelectorAll(".format-toolbar [data-format]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const fmt = btn.dataset.format;
-      const ta = bodyTextarea;
-      const start = ta.selectionStart;
-      const end = ta.selectionEnd;
-      const selected = ta.value.substring(start, end);
-      let before = "", after = "";
-      if (fmt === "bold") { before = "**"; after = "**"; }
-      else if (fmt === "italic") { before = "*"; after = "*"; }
-      else if (fmt === "list") { before = "\n- "; after = ""; }
-      else if (fmt === "link") { before = "["; after = `](${selected || "url"})`; }
-      ta.setRangeText(before + selected + after, start, end, "select");
-      ta.focus();
+      const editor = document.querySelector("#compose-body");
+      editor.focus();
+      if (fmt === "link") {
+        const url = prompt("输入链接 URL:", "https://");
+        if (url) document.execCommand("createLink", false, url);
+      } else if (fmt === "fontSize") {
+        // handled by change event
+      } else {
+        document.execCommand(fmt, false, null);
+      }
+    });
+  });
+  document.querySelectorAll(".format-toolbar select[data-format]").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      const editor = document.querySelector("#compose-body");
+      editor.focus();
+      document.execCommand("fontSize", false, sel.value);
     });
   });
 
@@ -2596,17 +2756,19 @@ function renderComposeWithTo(toEmail) {
   });
 
   // ── 保存草稿 ──
-  document.querySelector("#compose-draft").addEventListener("click", () => {
+  document.querySelector("#compose-draft").addEventListener("click", async () => {
+    const bodyHtml = document.querySelector("#compose-body").innerHTML;
     const form = new FormData(document.querySelector("#compose-form"));
     const draftData = {
-      mailbox_id: form.get("mailbox_id"),
-      recipients: form.get("recipients"),
-      subject: form.get("subject"),
-      body: form.get("body"),
-      format: form.get("format"),
+      mailbox_id: Number(form.get("mailbox_id")) || 0,
+      recipients: String(form.get("recipients") || "").split(",").map(s => s.trim()).filter(Boolean),
+      subject: form.get("subject") || "",
+      body: bodyHtml,
+      format: "html",
     };
-    localStorage.setItem("wuyou.draft", JSON.stringify(draftData));
-    toast(t("compose.draftSaved", "草稿已保存。"));
+    if (!draftData.mailbox_id) { toast(t("compose.selectAccount", "请选择发件账户"), "error"); return; }
+    await api("/api/mail/draft", { method: "POST", body: { ...draftData, cc: [], bcc: [], encryption_mode: "auto", attachment_ids: [] } });
+    toast(t("compose.draftSaved", "草稿已保存至服务器。"));
   });
 
   // ── 定时发送 ──
@@ -2623,13 +2785,16 @@ function renderComposeWithTo(toEmail) {
     const userInput = prompt("选择发送时间 (YYYY-MM-DD HH:MM)", defaultTime);
     if (!userInput) return;
     const isoTime = new Date(userInput).toISOString();
+    const bodyHtml = document.querySelector("#compose-body").innerHTML;
+    const bodyText = document.querySelector("#compose-body").innerText;
+    document.querySelector("#compose-body-hidden").value = bodyText;
     const form = new FormData(document.querySelector("#compose-form"));
     const payload = {
       mailbox_id: Number(form.get("mailbox_id")),
       recipients: String(form.get("recipients")).split(",").map((item) => item.trim()).filter(Boolean),
       subject: form.get("subject"),
-      body: form.get("body"),
-      format: form.get("format"),
+      body: bodyText,
+      format: "html",
       encryption_mode: form.get("encryption_mode"),
       attachment_ids: composeAttachments.map((a) => a.id),
       in_reply_to: draft.in_reply_to || null,
@@ -2661,12 +2826,15 @@ function renderComposeWithTo(toEmail) {
     sendBtn.disabled = true;
     sendBtn.textContent = t("compose.sending", "发送中...");
     try {
+      const bodyHtml = document.querySelector("#compose-body").innerHTML;
+      const bodyText = document.querySelector("#compose-body").innerText;
+      document.querySelector("#compose-body-hidden").value = bodyText;
       const payload = {
         mailbox_id: Number(form.get("mailbox_id")),
         recipients: String(form.get("recipients")).split(",").map((item) => item.trim()).filter(Boolean),
         subject: form.get("subject"),
-        body: form.get("body"),
-        format: form.get("format"),
+        body: bodyText,
+        format: "html",
         encryption_mode: form.get("encryption_mode"),
         attachment_ids: composeAttachments.map((a) => a.id),
         in_reply_to: draft.in_reply_to || null,
@@ -3414,6 +3582,124 @@ async function showSyncJobsModal() {
       .join("");
   } catch (error) {
     const list = overlay.querySelector("#sync-jobs-list");
+    list.innerHTML = `<div class="empty-state" style="color:#e74c3c">${esc(error.message)}</div>`;
+  }
+}
+
+async function showFolderManagerModal() {
+  const oldOverlay = document.querySelector("#folder-manager-overlay");
+  if (oldOverlay) oldOverlay.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "folder-manager-overlay";
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:600px">
+      <h3>${t("mail.folderManager", "文件夹管理")}</h3>
+      <div id="folder-manager-list"><div class="empty-state">${t("common.loading", "加载中...")}</div></div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn" id="folder-manager-close">${t("common.close", "关闭")}</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  overlay.querySelector("#folder-manager-close").addEventListener("click", () => overlay.remove());
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+
+  await refreshFolderManagerList(overlay);
+}
+
+async function refreshFolderManagerList(overlay) {
+  const list = overlay.querySelector("#folder-manager-list");
+  try {
+    const folders = await api("/api/mail/folders");
+    const accounts = await api("/api/accounts");
+    const accountMap = {};
+    (accounts || []).forEach((a) => { accountMap[a.id] = a.display_name || a.email_address; });
+
+    if (!folders || !folders.length) {
+      list.innerHTML = `<div class="empty-state">${t("mail.noFolders", "暂无文件夹")}</div>`;
+      return;
+    }
+
+    list.innerHTML = folders.map((f) => {
+      const folderId = f.folder_id || "";
+      const mailboxId = f.mailbox_id || "";
+      const accountLabel = accountMap[mailboxId] || `邮箱#${mailboxId}`;
+      const displayName = f.display_name || f.folder_role;
+      const count = f.count || 0;
+      const isSystem = ["inbox", "sent", "trash", "archive", "junk"].includes(f.folder_role) && f.folder_role !== "custom";
+
+      return `<div class="item-card" style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <strong>${esc(displayName)}</strong>
+          <span class="muted" style="margin-left:8px;font-size:0.85em">${count} ${t("mail.messageCount", "封")}</span>
+          <span class="muted" style="margin-left:8px;font-size:0.8em;color:var(--muted)">${esc(accountLabel)}</span>
+        </div>
+        <div class="btn-row" style="gap:4px">
+          ${folderId && !isSystem ? `
+            <button class="btn" data-rename-folder="${folderId}" data-old-name="${esc(displayName)}" style="font-size:11px;padding:2px 8px">${t("common.rename", "重命名")}</button>
+            <button class="btn" data-delete-folder="${folderId}" style="font-size:11px;padding:2px 8px;color:#e74c3c">${t("common.delete", "删除")}</button>
+          ` : folderId ? `<span class="muted" style="font-size:0.75em">${t("mail.systemFolder", "系统文件夹")}</span>` : ""}
+        </div>
+      </div>`;
+    }).join("") + `
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">
+        <h4 style="margin:0 0 8px">${t("mail.newFolder", "新建文件夹")}</h4>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="new-folder-name" placeholder="${t("mail.folderNamePlaceholder", "文件夹名称")}" style="flex:1;min-width:120px" />
+          <select id="new-folder-mailbox" style="min-width:140px">
+            ${Object.entries(accountMap).map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join("")}
+          </select>
+          <button class="btn primary" id="create-folder-btn" style="white-space:nowrap">${t("common.create", "创建")}</button>
+        </div>
+      </div>
+    `;
+
+    overlay.querySelector("#create-folder-btn").addEventListener("click", async () => {
+      const nameInput = overlay.querySelector("#new-folder-name");
+      const mailboxSelect = overlay.querySelector("#new-folder-mailbox");
+      const name = nameInput.value.trim();
+      const mailboxId = parseInt(mailboxSelect.value);
+      if (!name) { toast(t("mail.folderNameRequired", "请输入文件夹名称"), "error"); return; }
+      if (!mailboxId) { toast(t("mail.mailboxRequired", "请选择邮箱"), "error"); return; }
+      try {
+        await api("/api/mail/folders", { method: "POST", body: { mailbox_id: mailboxId, folder_name: name } });
+        toast(t("mail.folderCreated", "文件夹已创建。"));
+        nameInput.value = "";
+        await refreshFolderManagerList(overlay);
+      } catch (err) { toast(err.message, "error"); }
+    });
+
+    overlay.querySelectorAll("[data-rename-folder]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const fid = parseInt(btn.dataset.renameFolder);
+        const oldName = btn.dataset.oldName;
+        const newName = prompt(t("mail.renameFolderPrompt", "输入新名称："), oldName);
+        if (!newName || newName.trim() === oldName) return;
+        try {
+          await api(`/api/mail/folders/${fid}`, { method: "PUT", body: { new_name: newName.trim() } });
+          toast(t("mail.folderRenamed", "文件夹已重命名。"));
+          await refreshFolderManagerList(overlay);
+          renderInbox();
+        } catch (err) { toast(err.message, "error"); }
+      });
+    });
+
+    overlay.querySelectorAll("[data-delete-folder]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const fid = parseInt(btn.dataset.deleteFolder);
+        if (!confirm(t("mail.confirmDeleteFolder", "确定删除此文件夹？相关邮件可能丢失。"))) return;
+        try {
+          await api(`/api/mail/folders/${fid}`, { method: "DELETE" });
+          toast(t("mail.folderDeleted", "文件夹已删除。"));
+          await refreshFolderManagerList(overlay);
+          renderInbox();
+        } catch (err) { toast(err.message, "error"); }
+      });
+    });
+  } catch (error) {
     list.innerHTML = `<div class="empty-state" style="color:#e74c3c">${esc(error.message)}</div>`;
   }
 }

@@ -120,6 +120,7 @@ class MessageOut(BaseModel):
     id: int
     mailbox_id: int | None = None
     folder: str
+    folder_role: str = "inbox"
     subject: str
     sender: str
     recipients: list[str]

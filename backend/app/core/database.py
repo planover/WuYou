@@ -507,6 +507,24 @@ CREATE TABLE IF NOT EXISTS auto_reply_log (
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+CREATE TABLE IF NOT EXISTS drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    mailbox_id INTEGER NOT NULL,
+    recipients_json TEXT NOT NULL DEFAULT '[]',
+    cc_json TEXT NOT NULL DEFAULT '[]',
+    bcc_json TEXT NOT NULL DEFAULT '[]',
+    subject TEXT NOT NULL DEFAULT '',
+    body_text TEXT NOT NULL DEFAULT '',
+    body_html TEXT NOT NULL DEFAULT '',
+    format TEXT NOT NULL DEFAULT 'text',
+    imap_folder TEXT NOT NULL DEFAULT 'Drafts',
+    imap_uid TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_auto_reply_log_user_mailbox_reply
     ON auto_reply_log(user_id, mailbox_id, reply_to);
 

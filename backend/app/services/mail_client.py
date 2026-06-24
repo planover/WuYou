@@ -478,3 +478,104 @@ def send_email(account: dict[str, Any], secret: str, request: SendMailRequest, a
             server.login(account["username"], secret)
             server.send_message(message, to_addrs=recipients)
     return {"message": "邮件已提交至 SMTP 服务器。", "encrypted_transport": True, "pgp_encrypted": pgp_encrypted}
+
+def create_imap_folder(account: dict[str, Any], secret: str, folder_name: str) -> None:
+    if account["auth_type"] in {"oauth2", "sms_code"}:
+        raise RuntimeError("该登录方式需要接入服务商 OAuth2/验证码网关后才能操作。")
+    if account["imap_ssl"]:
+        conn = imaplib.IMAP4_SSL(account["imap_host"], int(account["imap_port"]))
+    else:
+        conn = imaplib.IMAP4(account["imap_host"], int(account["imap_port"]))
+        conn.starttls(ssl.create_default_context())
+    try:
+        conn.login(account["username"], secret)
+        result, _ = conn.create(f'"{folder_name}"')
+        if result != "OK":
+            raise RuntimeError(f"创建文件夹失败：{folder_name}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        try:
+            conn.logout()
+        except Exception:
+            pass
+
+
+def save_draft_to_imap(account: dict[str, Any], secret: str, msg_bytes: bytes, folder_name: str = "Drafts") -> None:
+    import time as _time
+    if account["imap_ssl"]:
+        conn = imaplib.IMAP4_SSL(account["imap_host"], int(account["imap_port"]))
+    else:
+        conn = imaplib.IMAP4(account["imap_host"], int(account["imap_port"]))
+    try:
+        conn.login(account["username"], secret)
+        conn.append(folder_name, '\\Draft', imaplib.Time2Internaldate(_time.time()), msg_bytes)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        try:
+            conn.logout()
+        except Exception:
+            pass
+
+
+def _build_raw_email(account: dict[str, Any], payload) -> bytes:
+    msg = EmailMessage()
+    msg["From"] = account["email_address"]
+    msg["To"] = ", ".join(str(r) for r in payload.recipients)
+    msg["Subject"] = payload.subject
+    msg.set_content(payload.body or "")
+    return msg.as_bytes()
+
+
+def delete_imap_folder(account: dict[str, Any], secret: str, folder_name: str) -> None:
+    if account["auth_type"] in {"oauth2", "sms_code"}:
+        raise RuntimeError("该登录方式需要接入服务商 OAuth2/验证码网关后才能操作。")
+    if account["imap_ssl"]:
+        conn = imaplib.IMAP4_SSL(account["imap_host"], int(account["imap_port"]))
+    else:
+        conn = imaplib.IMAP4(account["imap_host"], int(account["imap_port"]))
+        conn.starttls(ssl.create_default_context())
+    try:
+        conn.login(account["username"], secret)
+        result, _ = conn.delete(f'"{folder_name}"')
+        if result != "OK":
+            raise RuntimeError(f"删除文件夹失败：{folder_name}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        try:
+            conn.logout()
+        except Exception:
+            pass
+
+
+def rename_imap_folder(account: dict[str, Any], secret: str, old_name: str, new_name: str) -> None:
+    if account["auth_type"] in {"oauth2", "sms_code"}:
+        raise RuntimeError("该登录方式需要接入服务商 OAuth2/验证码网关后才能操作。")
+    if account["imap_ssl"]:
+        conn = imaplib.IMAP4_SSL(account["imap_host"], int(account["imap_port"]))
+    else:
+        conn = imaplib.IMAP4(account["imap_host"], int(account["imap_port"]))
+        conn.starttls(ssl.create_default_context())
+    try:
+        conn.login(account["username"], secret)
+        result, _ = conn.rename(f'"{old_name}"', f'"{new_name}"')
+        if result != "OK":
+            raise RuntimeError(f"重命名文件夹失败：{old_name} -> {new_name}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        try:
+            conn.logout()
+        except Exception:
+            pass
+
