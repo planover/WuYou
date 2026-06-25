@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import routes_accounts, routes_auth, routes_dav, routes_items, routes_locales, routes_mail, routes_mail_extras, routes_pgp, routes_plugins, routes_settings, routes_share, routes_sync, routes_sync_peers, routes_sync_remotes, routes_system, routes_telemetry, routes_themes, routes_translate
+from app.api import routes_accounts, routes_auth, routes_dav, routes_items, routes_locales, routes_mail, routes_mail_extras, routes_pgp, routes_plugins, routes_settings, routes_share, routes_smime, routes_sync, routes_sync_peers, routes_sync_remotes, routes_system, routes_telemetry, routes_themes, routes_translate
 from app.core.config import get_settings
 from app.core.database import db
 from app.core.security import utc_iso
@@ -64,6 +64,7 @@ app.include_router(routes_themes.router)
 app.include_router(routes_locales.router)
 app.include_router(routes_translate.router)
 app.include_router(routes_share.router)
+app.include_router(routes_smime.router)
 app.include_router(routes_system.router)
 app.include_router(routes_telemetry.router)
 

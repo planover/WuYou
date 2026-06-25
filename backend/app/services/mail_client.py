@@ -427,6 +427,20 @@ def send_email(account: dict[str, Any], secret: str, request: SendMailRequest, a
     else:
         message["X-WuYou-Encryption"] = "tls-auto"
 
+    if request.encryption_mode == "smime":
+        from app.core.database import db as _db
+        for rcpt in request.recipients:
+            cert_row = _db.query_one(
+                "SELECT cert_pem FROM smime_certs WHERE email_address = ? AND user_id IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+                (str(rcpt),))
+            if cert_row:
+                message["X-WuYou-SMIME"] = "attempted"
+                break
+
+    if getattr(request, 'request_receipt', False):
+        message["Disposition-Notification-To"] = account["email_address"]
+        message["Return-Receipt-To"] = account["email_address"]
+
     if request.in_reply_to:
         from app.core.database import db as _db
         orig = _db.query_one("SELECT external_id, raw_headers FROM messages WHERE id = ?", (request.in_reply_to,))

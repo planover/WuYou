@@ -559,6 +559,19 @@ def toggle_junk(message_id: int, current_user: dict = Depends(get_current_user))
         return {"junk": True}
 
 
+@router.post("/messages/{message_id}/archive")
+def archive_message(message_id: int, current_user: dict = Depends(get_current_user)):
+    row = db.query_one("SELECT id, folder_role FROM messages WHERE id = ? AND user_id = ?", (message_id, current_user["user_id"]))
+    if not row:
+        raise HTTPException(status_code=404, detail="邮件不存在。")
+    if row["folder_role"] == "archive":
+        db.execute("UPDATE messages SET folder_role = ?, folder = ? WHERE id = ?", ("inbox", "inbox", message_id))
+        return {"archived": False}
+    else:
+        db.execute("UPDATE messages SET folder_role = ?, folder = ? WHERE id = ?", ("archive", "archive", message_id))
+        return {"archived": True}
+
+
 @router.get("/search")
 def search(q: str, current_user: dict = Depends(get_current_user)):
     like = f"%{q}%"
@@ -581,4 +594,28 @@ def search(q: str, current_user: dict = Depends(get_current_user)):
         (current_user["user_id"], like, like),
     )
     return {"results": [dict(row) for row in messages + content]}
+
+
+@router.get("/saved-searches")
+def list_saved_searches(current_user: dict = Depends(get_current_user)):
+    rows = db.query_all("SELECT * FROM saved_searches WHERE user_id = ? ORDER BY name", (current_user["user_id"],))
+    return [{"id": r["id"], "name": r["name"], "query": json_loads(r["query_json"], {})} for r in rows]
+
+
+@router.post("/saved-searches")
+def create_saved_search(payload: dict, current_user: dict = Depends(get_current_user)):
+    now = utc_iso()
+    cursor = db.execute(
+        "INSERT INTO saved_searches(user_id, name, query_json, created_at) VALUES (?, ?, ?, ?)",
+        (current_user["user_id"], payload["name"], json.dumps(payload["query"]), now))
+    return {"id": cursor.lastrowid, "message": "已保存搜索。"}
+
+
+@router.delete("/saved-searches/{search_id}")
+def delete_saved_search(search_id: int, current_user: dict = Depends(get_current_user)):
+    row = db.query_one("SELECT id FROM saved_searches WHERE id = ? AND user_id = ?", (search_id, current_user["user_id"]))
+    if not row:
+        raise HTTPException(status_code=404, detail="搜索不存在。")
+    db.execute("DELETE FROM saved_searches WHERE id = ?", (search_id,))
+    return {"message": "已删除搜索。"}
 

@@ -154,9 +154,10 @@ class SendMailRequest(BaseModel):
     subject: str = Field(min_length=1, max_length=256)
     body: str = Field(default="", max_length=2_000_000)
     format: Literal["text", "markdown", "html"] = "text"
-    encryption_mode: Literal["auto", "tls_only", "pgp"] = "auto"
+    encryption_mode: Literal["auto", "tls_only", "pgp", "smime"] = "auto"
     attachment_ids: list[int] = []
     in_reply_to: int | None = None
+    request_receipt: bool = False
 
 
 class ScheduledMailCreate(BaseModel):
@@ -274,4 +275,10 @@ class ThreadOut(BaseModel):
     messages: list[MessageOut]
     latest_at: str
     count: int
+
+
+class SmimeCertImport(BaseModel):
+    email_address: str = Field(min_length=1)
+    cert_pem: str = Field(min_length=1)
+    private_key_pem: str = ""
 

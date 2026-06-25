@@ -1,4 +1,4 @@
-const app = document.querySelector("#app");
+﻿const app = document.querySelector("#app");
 const toastHost = document.querySelector("#toast");
 
 const state = {
@@ -16,6 +16,26 @@ const state = {
   folderRole: "all",
   threadedView: false,
 };
+
+function notifyDesktop(title, body) {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "granted") {
+    new Notification(title, { body, icon: "/static/favicon.ico" });
+  } else if (Notification.permission !== "denied") {
+    Notification.requestPermission().then(p => { if (p === "granted") new Notification(title, { body }); });
+  }
+}
+
+async function updateCacheStatus() {
+  if (!("caches" in window)) return;
+  try {
+    const keys = await caches.keys();
+    const el = document.getElementById("cache-status");
+    if (el) {
+      el.textContent = keys.length ? t("settings.cacheEntries","缓存条目: {count}").replace("{count}", keys.length) : t("settings.cacheEmpty","缓存为空");
+    }
+  } catch (e) { /* ignore */ }
+}
 
 const calendarState = {
   currentDate: new Date(),
@@ -607,6 +627,7 @@ async function route(view) {
 }
 
 const inboxFilters = { sender: "", dateFrom: "", dateTo: "", hasAttachments: false };
+let activeQF = null;
 
 async function renderInbox(status = "all", query = "", folderRole = null) {
   if (folderRole !== null) state.folderRole = folderRole;
@@ -618,10 +639,16 @@ async function renderInbox(status = "all", query = "", folderRole = null) {
       <section class="list-pane">
         <div class="toolbar">
           <input id="mail-search" placeholder="${t("mail.search", "搜索邮件标题、正文或发件人")}" value="${esc(query)}" />
+          <button class="btn" id="save-search-btn" title="${t("mail.saveSearch","保存当前搜索")}" style="padding:2px 6px;font-size:14px">💾</button>
           <button class="btn" id="sync-all">${t("mail.sync", "同步")}</button>
           <button class="btn" id="show-sync-jobs">&#128260; ${t("sync.jobs", "同步任务")}</button>
         </div>
         <div class="filter-bar" id="inbox-filter-bar" style="display:flex;gap:6px;padding:6px 8px;flex-wrap:wrap;font-size:12px;background:var(--surface);border-bottom:1px solid var(--border)">
+          <div style="display:flex;gap:4px;padding-bottom:4px;border-bottom:1px solid var(--border);width:100%">
+            <button class="btn btn-sm qf-btn" data-qf="unread" style="padding:2px 8px;font-size:11px">📩 ${t("mail.qfUnread","未读")}</button>
+            <button class="btn btn-sm qf-btn" data-qf="starred" style="padding:2px 8px;font-size:11px">⭐ ${t("mail.qfStarred","星标")}</button>
+            <button class="btn btn-sm qf-btn" data-qf="has_attachments" style="padding:2px 8px;font-size:11px">📎 ${t("mail.qfAttached","附件")}</button>
+          </div>
           <input id="filter-sender" placeholder="${t("mail.filterSender", "发件人")}" value="${esc(inboxFilters.sender)}" style="width:140px;padding:4px 8px" />
           <input type="date" id="filter-date-from" value="${inboxFilters.dateFrom}" style="width:130px;padding:4px 8px" />
           <input type="date" id="filter-date-to" value="${inboxFilters.dateTo}" style="width:130px;padding:4px 8px" />
@@ -637,6 +664,7 @@ async function renderInbox(status = "all", query = "", folderRole = null) {
           }).join("")}
           <button class="btn" id="manage-folders" style="font-size:11px;padding:2px 6px" title="${t("mail.manageFolders", "管理文件夹")}">📁+</button>
         </div>
+        <div id="saved-searches-tabs" style="display:flex;gap:2px;padding:4px 8px;font-size:12px"></div>
         <div id="mail-list"><div class="empty-state">${t("common.loading", "加载中...")}</div></div>
       </section>
     </div>
@@ -647,6 +675,16 @@ async function renderInbox(status = "all", query = "", folderRole = null) {
   });
   document.querySelector("#sync-all").addEventListener("click", syncAll);
   document.querySelector("#show-sync-jobs").addEventListener("click", showSyncJobsModal);
+  document.querySelector("#save-search-btn").addEventListener("click", async () => {
+    const name = prompt(t("mail.saveSearchName","搜索名称:"), "");
+    if (!name) return;
+    const q = document.querySelector("#mail-search").value.trim();
+    try {
+      await api("/api/mail/saved-searches", { method: "POST", body: { name, query: { q, activeQF, ...inboxFilters } } });
+      toast(t("mail.searchSaved","搜索已保存。"));
+      loadSavedSearchesTabs();
+    } catch (err) { toast(err.message, "error"); }
+  });
   document.querySelectorAll(".folder-tab").forEach((btn) => {
     btn.addEventListener("click", () => renderInbox(status, query, btn.dataset.folder));
   });
@@ -664,6 +702,19 @@ async function renderInbox(status = "all", query = "", folderRole = null) {
     inboxFilters.dateTo = "";
     inboxFilters.hasAttachments = false;
     renderInbox(status, query, role);
+  });
+  activeQF = null;
+  document.querySelectorAll(".qf-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (activeQF === btn.dataset.qf) { activeQF = null; btn.style.background = ""; }
+      else {
+        if (activeQF) { const prev = document.querySelector(`.qf-btn[data-qf="${activeQF}"]`); if (prev) prev.style.background = ""; }
+        activeQF = btn.dataset.qf;
+        btn.style.background = "var(--primary)";
+        btn.style.color = "#fff";
+      }
+      renderInbox(status, query, role);
+    });
   });
   document.querySelector("#toggle-thread-view").addEventListener("click", () => {
     state.threadedView = !state.threadedView;
@@ -683,10 +734,14 @@ async function renderInbox(status = "all", query = "", folderRole = null) {
   } catch (error) {
     toast(error.message, "error");
   }
+  loadSavedSearchesTabs();
 }
 
 function applyInboxFilters(messages) {
   return messages.filter((msg) => {
+    if (activeQF === "unread" && !msg.unread) return false;
+    if (activeQF === "starred" && !msg.starred) return false;
+    if (activeQF === "has_attachments" && !msg.has_attachments) return false;
     if (inboxFilters.sender && !(msg.sender || "").toLowerCase().includes(inboxFilters.sender.toLowerCase())) return false;
     if (inboxFilters.dateFrom && msg.received_at) {
       const msgDate = new Date(msg.received_at);
@@ -703,6 +758,25 @@ function applyInboxFilters(messages) {
     if (inboxFilters.hasAttachments && (!msg.has_attachments && !(msg.attachments && msg.attachments.length > 0))) return false;
     return true;
   });
+}
+
+async function loadSavedSearchesTabs() {
+  const container = document.querySelector("#saved-searches-tabs");
+  if (!container) return;
+  try {
+    const searches = await api("/api/mail/saved-searches");
+    container.innerHTML = searches.map(s =>
+      `<button class="folder-tab saved-search-tab" data-search-id="${s.id}" data-search-query='${esc(JSON.stringify(s.query))}' style="background:var(--surface);margin-right:4px">🔍 ${esc(s.name)}</button>`
+    ).join("");
+    document.querySelectorAll(".saved-search-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        const q = JSON.parse(tab.dataset.searchQuery || "{}");
+        if (q.activeQF) activeQF = q.activeQF;
+        else activeQF = null;
+        renderInbox("all", q.q || "", state.folderRole);
+      });
+    });
+  } catch {}
 }
 
 function renderMessageList() {
@@ -824,6 +898,7 @@ function renderReader(message) {
         <button class="btn" id="reply-mail">↩️ ${t("mail.reply", "回复")}</button>
         <button class="btn" id="reply-all-mail">↩️↩️ ${t("mail.replyAll", "回复全部")}</button>
         <button class="btn" id="forward-mail">↪️ ${t("mail.forward", "转发")}</button>
+        <button class="btn" id="archive-mail">📦 ${t("mail.archive", "归档")}</button>
         <button class="btn" id="translate-mail">${t("mail.translate", "翻译")}</button>
         <button class="btn" id="junk-mail">${message.folder_role === "junk" ? t("mail.notJunk", "非垃圾邮件") : t("mail.junk", "垃圾邮件")}</button>
         ${
@@ -895,6 +970,15 @@ function renderReader(message) {
       toast(error.message, "error");
     }
   });
+  document.querySelector("#archive-mail").addEventListener("click", async () => {
+    try {
+      const result = await api(`/api/mail/messages/${message.id}/archive`, { method: "POST" });
+      toast(result.archived ? t("mail.archived", "已归档") : t("mail.unarchived", "已移回收件箱"));
+      route("inbox");
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  });
 }
 
 function pollJobStatus(jobId, onUpdate) {
@@ -948,6 +1032,9 @@ async function syncAll() {
             const stats = job.stats_json ? (typeof job.stats_json === "string" ? JSON.parse(job.stats_json) : job.stats_json) : {};
             const newCount = stats.new_messages || 0;
             updateToast(`${account.display_name}: ${t("sync.completedNew","同步完成（新增{newCount}封）").replace("{newCount}", newCount)}`);
+            if (newCount > 0) {
+              notifyDesktop(t("mail.newMail", "新邮件"), `${newCount} ${t("mail.newMailCount", "封新邮件")}`);
+            }
             loadCommon().then(() => {
               renderShell();
               route(state.view);
@@ -1471,7 +1558,11 @@ function renderCompose() {
           <div id="group-chips" style="margin:4px 0;font-size:12px"></div>
           <div class="field wide"><label>${t("compose.subject", "主题")}</label><input name="subject" required value="${esc(draft.subject || "")}" /></div>
           <div class="field"><label>${t("compose.format", "格式")}</label><select name="format"><option value="text" ${draft.format === "text" ? "selected" : ""}>Text</option><option value="markdown" ${!draft.format || draft.format === "markdown" ? "selected" : ""}>Markdown</option><option value="html" ${draft.format === "html" ? "selected" : ""}>HTML</option></select></div>
-          <div class="field"><label>${t("compose.encryption", "加密策略")}</label><select name="encryption_mode"><option value="auto">Auto TLS</option><option value="tls_only">TLS Only</option><option value="pgp">PGP</option></select></div>
+          <div class="field"><label>${t("compose.encryption", "加密策略")}</label><select name="encryption_mode"><option value="auto">Auto TLS</option><option value="tls_only">TLS Only</option><option value="pgp">PGP</option><option value="smime">S/MIME</option></select></div>
+          <label style="display:flex;align-items:center;gap:6px;margin-top:8px;">
+            <input type="checkbox" name="request_receipt" />
+            ${t("compose.requestReceipt", "请求已读回执")}
+          </label>
           <div class="field wide">
             <label>${t("compose.body", "正文")}</label>
             <div class="format-toolbar" style="margin-bottom:8px;display:flex;gap:4px">
@@ -1490,7 +1581,7 @@ function renderCompose() {
               <button type="button" class="btn" data-format="link" title="${t("compose.toolbarLink","插入链接")}">🔗</button>
               <button type="button" class="btn" data-format="removeFormat" title="${t("compose.toolbarClearFormat","清除")}">Tx</button>
             </div>
-            <div id="compose-body" contenteditable="true" style="min-height:200px;padding:8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);outline:none;overflow-y:auto;max-height:500px">${draft.body || ""}</div>
+            <div id="compose-body" contenteditable="true" spellcheck="true" lang="${state.locale === 'zh-CN' ? 'zh-CN' : 'en'}" style="min-height:200px;padding:8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);outline:none;overflow-y:auto;max-height:500px">${draft.body || ""}</div>
             <input type="hidden" name="body" id="compose-body-hidden" value="" />
           </div>
           <div class="field wide">
@@ -1619,6 +1710,7 @@ function renderCompose() {
         encryption_mode: form.get("encryption_mode"),
         attachment_ids: composeAttachments.map((a) => a.id),
         in_reply_to: draft.in_reply_to || null,
+        request_receipt: form.get("request_receipt") === "on",
       };
       const result = await api("/api/mail/send", { method: "POST", body: payload });
       toast(result.message);
@@ -2149,6 +2241,20 @@ async function renderSettings() {
         <input type="text" id="set-email-code" placeholder="${t('settings.emailCode','验证码')}" maxlength="6">
         <button class="btn" id="btn-confirm-email">${t("settings.confirmChange","确认修改")}</button>
       </div>
+      <div class="form-group">
+        <label>${t("settings.offlineMode","离线模式")}</label>
+        <input type="checkbox" id="set-offline-mode">
+        <small id="cache-status">${t("settings.cacheStatus","正在检查缓存状态...")}</small>
+        <button class="btn" id="btn-clear-cache">${t("settings.clearCache","清除缓存")}</button>
+      </div>
+      <div class="form-group">
+        <label>${t("settings.smimeCerts","S/MIME 证书")}</label>
+        <div id="smime-list" style="margin-bottom:8px;font-size:12px"><span class="muted">${t("common.loading","加载中...")}</span></div>
+        <input type="text" id="smime-email" placeholder="${t("settings.smimeEmail","证书邮箱地址")}" style="width:100%;margin-bottom:4px" />
+        <textarea id="smime-cert-pem" placeholder="${t("settings.smimeCertPem","粘贴 X.509 证书 PEM 文本")}" rows="4" style="width:100%;font-family:monospace;font-size:11px;margin-bottom:4px"></textarea>
+        <textarea id="smime-key-pem" placeholder="${t("settings.smimeKeyPem","私钥 PEM（可选）")}" rows="4" style="width:100%;font-family:monospace;font-size:11px;margin-bottom:4px"></textarea>
+        <button class="btn primary" id="btn-import-smime">${t("settings.smimeImport","导入证书")}</button>
+      </div>
       <div class="btn-row">
         <button class="btn primary" id="btn-save-settings">${t("settings.saveAll","保存设置")}</button>
       </div>
@@ -2207,6 +2313,78 @@ async function renderSettings() {
     const r = await api("/api/auth/change-contact", { method: "PUT", body: {target_type:"email", target:email, code:code} });
     if (r.message) toast(r.message, "ok");
   };
+
+  if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+    updateCacheStatus();
+  }
+
+  document.getElementById("set-offline-mode").addEventListener("change", () => {
+    const checked = document.getElementById("set-offline-mode").checked;
+    localStorage.setItem("wuyou.offline", checked ? "1" : "0");
+    toast(checked ? t("settings.offlineEnabled","离线模式已开启") : t("settings.offlineDisabled","离线模式已关闭"));
+  });
+
+  document.getElementById("btn-clear-cache").addEventListener("click", async () => {
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+      toast(t("settings.cacheCleared","缓存已清除"), "ok");
+      updateCacheStatus();
+    }
+  });
+
+  const savedOffline = localStorage.getItem("wuyou.offline");
+  if (savedOffline === "1" && document.getElementById("set-offline-mode")) {
+    document.getElementById("set-offline-mode").checked = true;
+  }
+
+  async function loadSmimeCerts() {
+    try {
+      const certs = await api("/api/smime/certs");
+      const list = document.getElementById("smime-list");
+      if (!list) return;
+      if (!certs.length) {
+        list.innerHTML = `<span class="muted">${t("settings.smimeNoCerts","暂无 S/MIME 证书")}</span>`;
+        return;
+      }
+      list.innerHTML = certs.map(c => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid var(--border)">
+          <span>${esc(c.email_address)} ${c.is_contact ? t("settings.smimeContact","(联系人)") : t("settings.smimeOwn","(自有)")}</span>
+          <button class="btn" data-del-smime="${c.id}" style="color:var(--red);font-size:11px;padding:2px 6px">✕</button>
+        </div>
+      `).join("");
+      document.querySelectorAll("[data-del-smime]").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          if (!confirm(t("settings.smimeDeleteConfirm","确定要删除该证书吗？"))) return;
+          await api(`/api/smime/certs/${btn.dataset.delSmime}`, { method: "DELETE" });
+          toast(t("settings.smimeDeleted","证书已删除"), "ok");
+          loadSmimeCerts();
+        });
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  loadSmimeCerts();
+
+  document.getElementById("btn-import-smime").addEventListener("click", async () => {
+    const email = document.getElementById("smime-email").value.trim();
+    const certPem = document.getElementById("smime-cert-pem").value.trim();
+    const keyPem = document.getElementById("smime-key-pem").value.trim();
+    if (!email || !certPem) return toast(t("settings.smimeFillRequired","请填写邮箱和证书 PEM"), "error");
+    try {
+      const r = await api("/api/smime/certs", { method: "POST", body: { email_address: email, cert_pem: certPem, private_key_pem: keyPem } });
+      toast(r.message || t("settings.smimeImported","证书已导入"), "ok");
+      document.getElementById("smime-email").value = "";
+      document.getElementById("smime-cert-pem").value = "";
+      document.getElementById("smime-key-pem").value = "";
+      loadSmimeCerts();
+    } catch (e) { toast(e.message, "error"); }
+  });
+
+  document.querySelector("#show-onboarding-again").addEventListener("click", () => {
+    localStorage.removeItem("wuyou.onboarded");
+    showOnboarding();
+  });
 }
 
 async function renderRules() {
@@ -2651,7 +2829,11 @@ function renderComposeWithTo(toEmail) {
           <div id="group-chips" style="margin:4px 0;font-size:12px"></div>
           <div class="field wide"><label>${t("compose.subject", "主题")}</label><input name="subject" required value="${esc(draft.subject || "")}" /></div>
           <div class="field"><label>${t("compose.format", "格式")}</label><select name="format"><option value="text" ${draft.format === "text" ? "selected" : ""}>Text</option><option value="markdown" ${!draft.format || draft.format === "markdown" ? "selected" : ""}>Markdown</option><option value="html" ${draft.format === "html" ? "selected" : ""}>HTML</option></select></div>
-          <div class="field"><label>${t("compose.encryption", "加密策略")}</label><select name="encryption_mode"><option value="auto">Auto TLS</option><option value="tls_only">TLS Only</option><option value="pgp">PGP</option></select></div>
+          <div class="field"><label>${t("compose.encryption", "加密策略")}</label><select name="encryption_mode"><option value="auto">Auto TLS</option><option value="tls_only">TLS Only</option><option value="pgp">PGP</option><option value="smime">S/MIME</option></select></div>
+          <label style="display:flex;align-items:center;gap:6px;margin-top:8px;">
+            <input type="checkbox" name="request_receipt" />
+            ${t("compose.requestReceipt", "请求已读回执")}
+          </label>
           <div class="field wide">
             <label>${t("compose.body", "正文")}</label>
             <div class="format-toolbar" style="margin-bottom:8px;display:flex;gap:4px">
@@ -2670,7 +2852,7 @@ function renderComposeWithTo(toEmail) {
               <button type="button" class="btn" data-format="link" title="${t("compose.toolbarLink","插入链接")}">🔗</button>
               <button type="button" class="btn" data-format="removeFormat" title="${t("compose.toolbarClearFormat","清除")}">Tx</button>
             </div>
-            <div id="compose-body" contenteditable="true" style="min-height:200px;padding:8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);outline:none;overflow-y:auto;max-height:500px">${draft.body || ""}</div>
+            <div id="compose-body" contenteditable="true" spellcheck="true" lang="${state.locale === 'zh-CN' ? 'zh-CN' : 'en'}" style="min-height:200px;padding:8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);outline:none;overflow-y:auto;max-height:500px">${draft.body || ""}</div>
             <input type="hidden" name="body" id="compose-body-hidden" value="" />
           </div>
           <div class="field wide">
@@ -2798,6 +2980,7 @@ function renderComposeWithTo(toEmail) {
       encryption_mode: form.get("encryption_mode"),
       attachment_ids: composeAttachments.map((a) => a.id),
       in_reply_to: draft.in_reply_to || null,
+      request_receipt: form.get("request_receipt") === "on",
       scheduled_at: isoTime,
     };
     try {
@@ -2838,6 +3021,7 @@ function renderComposeWithTo(toEmail) {
         encryption_mode: form.get("encryption_mode"),
         attachment_ids: composeAttachments.map((a) => a.id),
         in_reply_to: draft.in_reply_to || null,
+        request_receipt: form.get("request_receipt") === "on",
       };
       const result = await api("/api/mail/send", { method: "POST", body: payload });
       toast(result.message);

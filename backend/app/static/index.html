@@ -18,5 +18,8 @@
     </div>
     <div id="toast" aria-live="polite"></div>
     <script src="/static/js/app.js" type="module"></script>
+    <script>
+    if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/static/sw.js'); }
+    </script>
   </body>
 </html>

@@ -555,6 +555,16 @@ CREATE TABLE IF NOT EXISTS message_templates (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS smime_certs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    email_address TEXT NOT NULL,
+    cert_pem TEXT NOT NULL,
+    private_key_pem TEXT NOT NULL DEFAULT '',
+    is_contact INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS contact_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -568,6 +578,15 @@ CREATE TABLE IF NOT EXISTS contact_group_members (
     group_id INTEGER NOT NULL REFERENCES contact_groups(id) ON DELETE CASCADE,
     contact_id INTEGER NOT NULL REFERENCES content_items(id) ON DELETE CASCADE,
     UNIQUE(group_id, contact_id)
+);
+
+CREATE TABLE IF NOT EXISTS saved_searches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    query_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    UNIQUE(user_id, name)
 );
 """
 
